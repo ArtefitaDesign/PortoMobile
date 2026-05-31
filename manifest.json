@@ -1,0 +1,22 @@
+{
+  "name": "Porto 2026 — Escalas",
+  "short_name": "Porto 2026",
+  "description": "App de escalas de serviço para voluntários do Congresso Porto 2026",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#0b0f19",
+  "theme_color": "#0b0f19",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "img/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "img/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ]
+}
