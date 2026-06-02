@@ -1029,6 +1029,54 @@ const App = (() => {
         }
       });
     });
+
+    document.querySelectorAll('.btn-add-cal').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const { title, date, start, end, sec, sub } = btn.dataset;
+        handleAddToCalendar(title, date, start, end, sec, sub);
+      });
+    });
+  };
+
+  const handleAddToCalendar = (title, dateStr, startTime, endTime, sectorName, subSector) => {
+    const formatICSDateTime = (dStr, tStr) => {
+      const dp = dStr.split('-');
+      const tp = tStr.split(':');
+      return `${dp[0]}${dp[1]}${dp[2]}T${tp[0]}${tp[1]}00`;
+    };
+
+    const formatICSDate = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    };
+
+    const loc = `Estádio do Dragão, Porto - Setor ${sectorName} (${subSector})`;
+    const desc = `Congresso Internacional Porto 2026\\nTurno de Serviço como voluntário no Setor ${sectorName}\\nSub-setor: ${subSector}\\nHorário: ${startTime} às ${endTime}`;
+    
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Porto 2026//Escalas//PT',
+      'BEGIN:VEVENT',
+      `UID:${Date.now()}-${Math.random()}@porto2026`,
+      `DTSTAMP:${formatICSDate(new Date())}`,
+      `DTSTART:${formatICSDateTime(dateStr, startTime)}`,
+      `DTEND:${formatICSDateTime(dateStr, endTime)}`,
+      `SUMMARY:${title}`,
+      `LOCATION:${loc}`,
+      `DESCRIPTION:${desc}`,
+      'END:VEVENT',
+      'END:VCALENDAR'
+    ].join('\r\n');
+
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `${title.replace(/\s+/g, '_')}_${dateStr}.ics`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // 1. INDICADOR VIEW
@@ -1101,13 +1149,21 @@ const App = (() => {
           <div id="details-${uniqueId}" class="shift-details-panel" style="display: none; margin-top: 12px; transition: all 0.3s ease;">
             ${capsHtml}
           </div>
-          <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+        `;
+      }
+
+      const buttonsHtml = `
+        <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
+          <button class="btn-add-cal" data-title="Porto 2026 — ${esc(roleText)}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
+            <span>📅 Agenda</span>
+          </button>
+          ${capsHtml ? `
             <button class="btn-toggle-details" data-target="details-${uniqueId}" style="background: var(--primary-light); color: var(--primary); border: 1px solid rgba(124, 58, 237, 0.12); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
               <span>👥 Ver Equipa</span>
             </button>
-          </div>
-        `;
-      }
+          ` : ''}
+        </div>
+      `;
 
       const cardCustomStyle = getCardStyle(a);
       const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: ${roleColor};`;
@@ -1127,6 +1183,7 @@ const App = (() => {
             Função: <span class="user-role-badge" style="background:${roleBg};color:${roleColor};border-color:${roleBorder};">${roleText}</span>
           </div>
           ${detailsHtml}
+          ${buttonsHtml}
         </div>`;
     });
 
@@ -1276,13 +1333,21 @@ const App = (() => {
             ${kmsHtml}
             ${teamHtml}
           </div>
-          <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+        `;
+      }
+
+      const buttonsHtml = `
+        <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
+          <button class="btn-add-cal" data-title="Porto 2026 — Capitão" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
+            <span>📅 Agenda</span>
+          </button>
+          ${hasDetails ? `
             <button class="btn-toggle-details" data-target="details-${uniqueId}" style="background: var(--primary-light); color: var(--primary); border: 1px solid rgba(124, 58, 237, 0.12); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
               <span>👥 Ver Equipa</span>
             </button>
-          </div>
-        `;
-      }
+          ` : ''}
+        </div>
+      `;
 
       const cardCustomStyle = getCardStyle(a);
       const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: var(--primary);`;
@@ -1299,6 +1364,7 @@ const App = (() => {
             📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
           </div>
           ${detailsHtml}
+          ${buttonsHtml}
         </div>`;
     });
 
@@ -1422,13 +1488,21 @@ const App = (() => {
             ${capsHtml}
             ${teamHtml}
           </div>
-          <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+        `;
+      }
+
+      const buttonsHtml = `
+        <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
+          <button class="btn-add-cal" data-title="Porto 2026 — Homem-Chave" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
+            <span>📅 Agenda</span>
+          </button>
+          ${hasDetails ? `
             <button class="btn-toggle-details" data-target="details-${uniqueId}" style="background: var(--primary-light); color: var(--primary); border: 1px solid rgba(124, 58, 237, 0.12); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
               <span>👥 Ver Equipa</span>
             </button>
-          </div>
-        `;
-      }
+          ` : ''}
+        </div>
+      `;
 
       const cardCustomStyle = getCardStyle(a);
       const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: var(--warning);`;
@@ -1445,6 +1519,7 @@ const App = (() => {
             📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
           </div>
           ${detailsHtml}
+          ${buttonsHtml}
         </div>`;
     });
 
