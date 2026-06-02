@@ -12,6 +12,7 @@ const App = (() => {
   let encryptedText = null;
   let activeDateFilter = 'all';
   let countdownInterval = null;
+  let backgroundSyncInterval = null;
 
   // Cache keys
   const CACHE_KEY_DB = 'porto2026_mobile_db';
@@ -126,7 +127,10 @@ const App = (() => {
         
         // Cache session start timestamp
         if (!sessionStorage.getItem('porto2026_session_start_time')) {
-          sessionStorage.setItem('porto2026_session_start_time', localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0');
+          const lastSeen = localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0';
+          const sessionStart = lastSeen !== '0' ? lastSeen : Date.now().toString();
+          sessionStorage.setItem('porto2026_session_start_time', sessionStart);
+          localStorage.setItem(`porto2026_last_seen_${currentUser.id}`, Date.now().toString());
         }
         
         showDashboard();
@@ -442,7 +446,13 @@ const App = (() => {
             currentUser = v;
             
             // Cache session start time
-            sessionStorage.setItem('porto2026_session_start_time', localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0');
+            const lastSeen = localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0';
+            const sessionStart = lastSeen !== '0' ? lastSeen : Date.now().toString();
+            sessionStorage.setItem('porto2026_session_start_time', sessionStart);
+            localStorage.setItem(`porto2026_last_seen_${currentUser.id}`, Date.now().toString());
+            
+            // Detect scale changes before caching the new database
+            detectScaleChanges(db);
             
             localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
             localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
@@ -457,7 +467,13 @@ const App = (() => {
         currentUser = matchingVolunteers[0];
         
         // Cache session start time
-        sessionStorage.setItem('porto2026_session_start_time', localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0');
+        const lastSeen = localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0';
+        const sessionStart = lastSeen !== '0' ? lastSeen : Date.now().toString();
+        sessionStorage.setItem('porto2026_session_start_time', sessionStart);
+        localStorage.setItem(`porto2026_last_seen_${currentUser.id}`, Date.now().toString());
+        
+        // Detect scale changes before caching the new database
+        detectScaleChanges(db);
         
         localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
         localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
@@ -478,6 +494,10 @@ const App = (() => {
     if (countdownInterval) {
       clearInterval(countdownInterval);
       countdownInterval = null;
+    }
+    if (backgroundSyncInterval) {
+      clearInterval(backgroundSyncInterval);
+      backgroundSyncInterval = null;
     }
     sessionStorage.removeItem('porto2026_session_start_time');
     localStorage.removeItem(CACHE_KEY_DB);
@@ -660,13 +680,131 @@ const App = (() => {
     else if (currentUser.isSister || r === 'IRM') roleText = 'Irmã';
     userRoleBadge.textContent = roleText;
 
+    detectScaleChanges(db);
     renderRoleDashboard();
+    startBackgroundSync();
+  };
+
+  const startBackgroundSync = () => {
+    if (backgroundSyncInterval) clearInterval(backgroundSyncInterval);
+    
+    // Background quiet synchronization interval (every 3 minutes = 180000ms)
+    backgroundSyncInterval = setInterval(async () => {
+      if (window.location.protocol === 'file:' || !currentUser || !currentUser.phone) return;
+
+      try {
+        const res = await fetch('./porto2026_mobile.enc?_nocache=' + Date.now());
+        if (!res.ok) return;
+        const text = await res.text();
+        
+        const savedGlobalEnc = localStorage.getItem('porto2026_global_enc');
+        if (text && text !== savedGlobalEnc) {
+          // A new scales file exists! Decrypt it silently in the background
+          const decryptedText = await decryptContainer(text, currentUser.phone);
+          const parsedDb = JSON.parse(decryptedText);
+          
+          const newMe = parsedDb.volunteers.find(v => String(v.id) === String(currentUser.id));
+          if (newMe) {
+            // Detect scale changes before silently updating database cache
+            detectScaleChanges(parsedDb);
+
+            db = parsedDb;
+            currentUser = newMe;
+            
+            // Silently cache updated version
+            localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
+            localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
+            localStorage.setItem('porto2026_global_enc', text);
+            
+            // Re-render user dashboard immediately with alterations highlighted!
+            renderRoleDashboard();
+            console.log("Dashboard silently synchronized with latest GitHub scales update!");
+          }
+        }
+      } catch (err) {
+        console.warn("Silent background sync skipped", err);
+      }
+    }, 180000);
   };
 
   // Observations Popups inside mobile PWA
   const openRemarksModal = (name, remarks) => {
     document.getElementById('obsModalText').textContent = remarks;
     obsModal.classList.add('open');
+  };
+
+  // Helper to synchronously detect shifts added or altered compared to a previously cached database
+  const detectScaleChanges = (newDb) => {
+    if (!newDb || !currentUser) return;
+    try {
+      const keyLastAssigns = `porto2026_last_assignments_${currentUser.id}`;
+      const oldAssignsStr = localStorage.getItem(keyLastAssigns);
+      
+      const newAssigns = newDb.assignments.filter(a => String(a.volunteerId) === String(currentUser.id));
+      
+      if (oldAssignsStr) {
+        const oldAssigns = JSON.parse(oldAssignsStr);
+        newAssigns.forEach(a => {
+          const oldA = oldAssigns.find(o => o.shiftId === a.shiftId && o.sectorId === a.sectorId);
+          const keyFirstSeen = `porto2026_alert_first_seen_${currentUser.id}_${a.id}`;
+          if (!oldA) {
+            // Assignment is completely NEW!
+            if (!localStorage.getItem(keyFirstSeen)) {
+              localStorage.setItem(keyFirstSeen, Date.now().toString());
+              localStorage.setItem(keyFirstSeen + '_type', 'new');
+            }
+          } else if (a.role !== oldA.role || a.updatedAt !== oldA.updatedAt) {
+            // Assignment was ALTERED!
+            if (!localStorage.getItem(keyFirstSeen)) {
+              localStorage.setItem(keyFirstSeen, Date.now().toString());
+              localStorage.setItem(keyFirstSeen + '_type', 'altered');
+            }
+          }
+        });
+      }
+      
+      // Save current assignments as the last seen ones for the next comparison
+      localStorage.setItem(keyLastAssigns, JSON.stringify(newAssigns));
+    } catch (err) {
+      console.warn("detectScaleChanges error", err);
+    }
+  };
+
+  // Helper to synchronously fetch premium card styles for newly detected shifts (light yellow background, golden left border)
+  const getCardStyle = (a) => {
+    if (!currentUser) return '';
+    const key = `porto2026_alert_first_seen_${currentUser.id}_${a.id}`;
+    const firstSeen = localStorage.getItem(key);
+    if (firstSeen) {
+      const elapsed = Date.now() - parseInt(firstSeen);
+      if (elapsed < 3600000) {
+        const type = localStorage.getItem(key + '_type') || 'new';
+        if (type === 'new') {
+          return `background: #fefce8; border-color: rgba(234, 179, 8, 0.15); border-left-color: #ca8a04 !important;`;
+        }
+      }
+    }
+    return '';
+  };
+
+  // Helper to determine and track shift change badges (remains active for 1 hour since first visualized)
+  const getChangeBadgeHtml = (a, sessionStart) => {
+    if (!currentUser) return '';
+    const key = `porto2026_alert_first_seen_${currentUser.id}_${a.id}`;
+    const firstSeen = localStorage.getItem(key);
+    if (firstSeen) {
+      const elapsed = Date.now() - parseInt(firstSeen);
+      if (elapsed < 3600000) { // 1 hour in ms
+        const type = localStorage.getItem(key + '_type') || 'new';
+        if (type === 'altered') {
+          return `<span class="badge-change altered">Alterado</span>`;
+        } else {
+          // Yellow box with dark yellow letters and a bell icon
+          return `<span class="badge-change new" style="background: rgba(234, 179, 8, 0.15); color: #854d0e; border: 1px solid rgba(234, 179, 8, 0.3);">🔔 Novo</span>`;
+        }
+      }
+    }
+    return '';
   };
 
   // Dashboard Rendering based on user database roles
@@ -922,16 +1060,7 @@ const App = (() => {
       const roleColor = a.role === 'CAP' ? 'var(--primary)' : (a.role === 'KM' ? 'var(--warning)' : 'var(--info)');
       const roleBorder = a.role === 'CAP' ? 'rgba(124, 58, 237, 0.15)' : (a.role === 'KM' ? 'rgba(217, 119, 6, 0.15)' : 'rgba(2, 132, 199, 0.15)');
 
-      let changeBadgeHtml = '';
-      if (sessionStart > 0) {
-        const createdTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const updatedTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        if (updatedTime > sessionStart) {
-          changeBadgeHtml = `<span class="badge-change altered">Alterado</span>`;
-        } else if (createdTime > sessionStart) {
-          changeBadgeHtml = `<span class="badge-change new">Novo</span>`;
-        }
-      }
+      const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
 
       // Find Captains of this sector/shift
       const captains = db.assignments
@@ -980,8 +1109,10 @@ const App = (() => {
         `;
       }
 
+      const cardCustomStyle = getCardStyle(a);
+      const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: ${roleColor};`;
       html += `
-        <div class="scale-card scale-card-accent" style="border-left-color: ${roleColor};">
+        <div class="scale-card scale-card-accent" style="${borderLeftStyle} ${cardCustomStyle}">
           <div class="scale-card-header">
             <div>
               <h3>${esc(sec.name)} ${changeBadgeHtml}</h3>
@@ -1026,16 +1157,7 @@ const App = (() => {
       const sec = item.sector;
       const a = item.assign;
 
-      let changeBadgeHtml = '';
-      if (sessionStart > 0) {
-        const createdTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const updatedTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        if (updatedTime > sessionStart) {
-          changeBadgeHtml = `<span class="badge-change altered">Alterado</span>`;
-        } else if (createdTime > sessionStart) {
-          changeBadgeHtml = `<span class="badge-change new">Novo</span>`;
-        }
-      }
+      const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
 
       // Find all team indicators assigned to this same shift and sector
       const sameSecAssigns = db.assignments.filter(a => a.shiftId === sh.id && a.sectorId === sec.id);
@@ -1162,8 +1284,10 @@ const App = (() => {
         `;
       }
 
+      const cardCustomStyle = getCardStyle(a);
+      const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: var(--primary);`;
       html += `
-        <div class="scale-card scale-card-accent" style="border-left-color: var(--primary);">
+        <div class="scale-card scale-card-accent" style="${borderLeftStyle} ${cardCustomStyle}">
           <div class="scale-card-header">
             <div>
               <h3>${esc(sec.name)} ${changeBadgeHtml}</h3>
@@ -1206,16 +1330,7 @@ const App = (() => {
       const sec = item.sector;
       const a = item.assign;
 
-      let changeBadgeHtml = '';
-      if (sessionStart > 0) {
-        const createdTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const updatedTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        if (updatedTime > sessionStart) {
-          changeBadgeHtml = `<span class="badge-change altered">Alterado</span>`;
-        } else if (createdTime > sessionStart) {
-          changeBadgeHtml = `<span class="badge-change new">Novo</span>`;
-        }
-      }
+      const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
 
       // Find all team indicators and captains assigned to this same shift and sector
       const sameSecAssigns = db.assignments.filter(a => a.shiftId === sh.id && a.sectorId === sec.id);
@@ -1315,8 +1430,10 @@ const App = (() => {
         `;
       }
 
+      const cardCustomStyle = getCardStyle(a);
+      const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: var(--warning);`;
       html += `
-        <div class="scale-card scale-card-accent" style="border-left-color:var(--warning);">
+        <div class="scale-card scale-card-accent" style="${borderLeftStyle} ${cardCustomStyle}">
           <div class="scale-card-header">
             <div>
               <h3>${esc(sec.name)} ${changeBadgeHtml}</h3>
@@ -1349,18 +1466,4 @@ const App = (() => {
 // Initialize when page loads
 window.addEventListener('DOMContentLoaded', App.init);
 
-// Save last seen timestamp when volunteer closes PWA or refreshes
-window.addEventListener('beforeunload', () => {
-  if (App && typeof sessionStorage !== 'undefined') {
-    // We save the last seen timestamp on beforeunload
-    const cachedUser = localStorage.getItem('porto2026_mobile_user');
-    if (cachedUser) {
-      try {
-        const u = JSON.parse(cachedUser);
-        if (u && u.id) {
-          localStorage.setItem(`porto2026_last_seen_${u.id}`, Date.now().toString());
-        }
-      } catch (err) {}
-    }
-  }
-});
+// Save last seen timestamp when volunteer closes PWA or refreshes (removed to prevent sessionStart reset on simple reload)
