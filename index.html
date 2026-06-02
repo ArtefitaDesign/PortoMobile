@@ -54,7 +54,21 @@
           
           <div class="form-group mb-4">
             <label class="form-label" for="loginPhone">Número de Telemóvel</label>
-            <input type="tel" id="loginPhone" class="form-input" placeholder="Ex: 912345678" autocomplete="tel">
+            <div style="display: flex; gap: 8px;">
+              <select id="countryCodeSelect" class="form-input" style="width: 106px; flex-shrink: 0; padding: 0 8px; text-align: center; font-weight: 600; cursor: pointer; background: var(--surface); border-color: var(--surface-border);">
+                <option value="351">🇵🇹 +351</option>
+                <option value="1">🇺🇸 +1</option>
+                <option value="34">🇪🇸 +34</option>
+                <option value="33">🇫🇷 +33</option>
+                <option value="44">🇬🇧 +44</option>
+                <option value="49">🇩🇪 +49</option>
+                <option value="55">🇧🇷 +55</option>
+                <option value="41">🇨🇭 +41</option>
+                <option value="32">🇧🇪 +32</option>
+                <option value="39">🇮🇹 +39</option>
+              </select>
+              <input type="tel" id="loginPhone" class="form-input" placeholder="Ex: 912345678" autocomplete="tel" style="flex: 1;">
+            </div>
           </div>
 
           <button id="btnLogin" class="btn-primary w-full" disabled style="margin-bottom: 8px;">Entrar na Escala</button>
@@ -163,22 +177,13 @@
           <input type="file" id="adminFileInp" accept=".enc" style="display:none;">
         </div>
 
-        <div class="file-picker-wrapper" style="margin-bottom: 20px;">
-          <label class="btn-file" for="adminLogoInp" style="border-style:solid; background:rgba(124, 58, 237, 0.03); color:var(--primary); border-color:rgba(124, 58, 237, 0.3);">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right:8px;"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-            <span>Carregar Logótipo (.png, .jpg, .svg)</span>
-          </label>
-          <input type="file" id="adminLogoInp" accept="image/*" style="display:none;">
-        </div>
-
         <div style="display: flex; gap: 8px;">
           <button class="btn-primary w-full" id="btnAdminClearDb" style="background:#ef4444; color:white; box-shadow:none; font-size:13.5px; font-weight:700;">Apagar Base de Dados</button>
-          <button class="btn-primary w-full" id="btnAdminClearLogo" style="background:#64748b; color:white; box-shadow:none; font-size:13.5px; font-weight:700; display:none;">Remover Logótipo</button>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="js/app.js?v=202605311445"></script>
+  <script src="js/app.js?v=202605311446"></script>
 </body>
 </html>
