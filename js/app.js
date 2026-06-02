@@ -1154,7 +1154,7 @@ const App = (() => {
 
       const buttonsHtml = `
         <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
-          <button class="btn-add-cal" data-title="Porto 2026 — ${esc(roleText)}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
+          <button class="btn-add-cal" data-title="${esc(roleText)} - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
             <span>📅 Agenda</span>
           </button>
           ${capsHtml ? `
@@ -1338,7 +1338,7 @@ const App = (() => {
 
       const buttonsHtml = `
         <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
-          <button class="btn-add-cal" data-title="Porto 2026 — Capitão" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
+          <button class="btn-add-cal" data-title="Capitão - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
             <span>📅 Agenda</span>
           </button>
           ${hasDetails ? `
@@ -1493,7 +1493,7 @@ const App = (() => {
 
       const buttonsHtml = `
         <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
-          <button class="btn-add-cal" data-title="Porto 2026 — Homem-Chave" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
+          <button class="btn-add-cal" data-title="Homem-Chave - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
             <span>📅 Agenda</span>
           </button>
           ${hasDetails ? `
