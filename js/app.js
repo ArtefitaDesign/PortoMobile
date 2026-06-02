@@ -707,7 +707,7 @@ const App = (() => {
         const activeCard = document.createElement('div');
         activeCard.className = 'premium-countdown-card mb-4';
         activeCard.innerHTML = `
-          <div class="scale-card scale-card-accent" style="border-left-color: var(--success); background: #fffbeb; border: 1px solid rgba(217, 119, 6, 0.12); padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
+          <div class="scale-card scale-card-accent" style="border-left-color: var(--success); background: #f0fdf4; border: 1px solid rgba(22, 163, 74, 0.15); padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
             <div style="position: relative; z-index: 1;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--success); background: rgba(16, 185, 129, 0.08); padding: 3px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(16, 185, 129, 0.15);">
@@ -717,7 +717,7 @@ const App = (() => {
               </div>
               <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin-bottom: 2px;">${esc(sec.name)}</h3>
               <p style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 0px; font-weight: 500;">
-                📍 ${esc(sec.subSector || 'Geral')} • 🕒 Termina às ${sh.endTime}
+                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}</span> • 🕒 Termina às ${sh.endTime}
               </p>
             </div>
           </div>
@@ -738,7 +738,7 @@ const App = (() => {
               </div>
               <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin-bottom: 2px;">${esc(sec.name)}</h3>
               <p style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
-                📍 ${esc(sec.subSector || 'Geral')} • 📅 ${getWeekDay(sh.date)}, ${formatDate(sh.date)} às ${sh.startTime}
+                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}</span> • 📅 ${getWeekDay(sh.date)}, ${formatDate(sh.date)} às ${sh.startTime}
               </p>
               <div style="width: 100%; height: 6px; background: rgba(0, 0, 0, 0.06); border-radius: 3px; overflow: hidden; margin-top: 8px;">
                 <div id="countdown-progress" style="width: 100%; height: 100%; background: var(--success); border-radius: 3px; transition: width 1s linear;"></div>

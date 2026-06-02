@@ -427,9 +427,9 @@ body {
 }
 
 .scale-subsector {
-  font-size: 12px;
-  color: var(--text-secondary);
-  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--danger);
+  font-weight: 800;
 }
 
 .scale-date-row {
