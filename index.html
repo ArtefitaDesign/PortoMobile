@@ -2,7 +2,7 @@
 <html lang="pt-PT">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Porto 2026 — Escalas</title>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -191,7 +191,7 @@
   <!-- SHIFT DETAILS POPUP (BOTTOM SHEET) -->
   <div id="shiftDetailsPopup" class="modal-overlay" style="align-items: flex-end; padding: 0;">
     <div class="modal bottom-sheet" style="max-width: 480px; width: 100%; border-radius: 28px 28px 0 0; margin: 0; animation: bottomSheetIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; max-height: 92vh; display: flex; flex-direction: column;">
-      <div style="width: 48px; height: 6px; background: rgba(0,0,0,0.22); border-radius: 4px; align-self: center; margin-top: 12px; margin-bottom: 4px; flex-shrink: 0; cursor: grab;"></div>
+      <div class="sheet-drag-handle" style="width: 48px; height: 6px; background: rgba(0,0,0,0.22); border-radius: 4px; align-self: center; margin-top: 12px; margin-bottom: 4px; flex-shrink: 0; cursor: grab; padding: 12px 32px; box-sizing: content-box; touch-action: none;"></div>
       <div class="modal-header" style="border-bottom: none; padding: 16px 24px 8px; flex-shrink: 0;">
         <h3 id="popupSectorName" style="font-size: 22px; font-weight: 800; color: var(--text-primary); margin: 0; letter-spacing: -0.02em;">Nome do Setor</h3>
         <button class="modal-close" id="closeShiftDetailsPopup" style="font-size: 28px; line-height: 1; padding: 4px;">&times;</button>
@@ -202,6 +202,6 @@
     </div>
   </div>
 
-  <script src="js/app.js?v=202606031655"></script>
+  <script src="js/app.js?v=202606031703"></script>
 </body>
 </html>

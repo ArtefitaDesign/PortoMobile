@@ -132,6 +132,16 @@ const App = (() => {
       encFileInp.addEventListener('change', handleFileSelect);
     }
 
+    // iOS fix: when keyboard appears the input can jump outside the login card.
+    // Wait for the keyboard to fully open (~350ms) then scroll the input into view.
+    if (loginPhone) {
+      loginPhone.addEventListener('focus', () => {
+        setTimeout(() => {
+          loginPhone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 350);
+      });
+    }
+
     // Bind Admin events
     btnAdminAccess.addEventListener('click', () => {
       adminPasswordInput.value = '';
@@ -166,44 +176,80 @@ const App = (() => {
       // Tap backdrop to close
       shiftDetailsPopup.addEventListener('click', (e) => { if (e.target === shiftDetailsPopup) shiftDetailsPopup.classList.remove('open'); });
 
-      // Swipe-down-to-dismiss (native iOS feel)
+      // Swipe-down-to-dismiss — attached ONLY to the drag handle so it
+      // doesn't compete with the scrollable body content inside the sheet.
       const sheetEl = shiftDetailsPopup.querySelector('.bottom-sheet');
-      if (sheetEl) {
-        let touchStartY = 0;
-        let currentTranslate = 0;
-        let isDragging = false;
+      const dragHandle = shiftDetailsPopup.querySelector('.sheet-drag-handle');
 
-        sheetEl.addEventListener('touchstart', (e) => {
-          touchStartY = e.touches[0].clientY;
-          currentTranslate = 0;
-          isDragging = true;
+      if (sheetEl && dragHandle) {
+        let startY = 0;
+        let currentY = 0;
+        let dragging = false;
+
+        const onStart = (clientY) => {
+          startY = clientY;
+          currentY = 0;
+          dragging = true;
+          // Pause the CSS entry animation so it doesn't fight the transform
+          sheetEl.style.animation = 'none';
           sheetEl.style.transition = 'none';
-        }, { passive: true });
+        };
 
-        sheetEl.addEventListener('touchmove', (e) => {
-          if (!isDragging) return;
-          const delta = e.touches[0].clientY - touchStartY;
+        const onMove = (clientY) => {
+          if (!dragging) return;
+          const delta = clientY - startY;
           if (delta > 0) {
-            currentTranslate = delta;
+            currentY = delta;
             sheetEl.style.transform = `translateY(${delta}px)`;
           }
-        }, { passive: true });
+        };
 
-        sheetEl.addEventListener('touchend', () => {
-          isDragging = false;
-          sheetEl.style.transition = '';
-          if (currentTranslate > 80) {
-            // Swipe far enough — dismiss
-            sheetEl.style.transform = 'translateY(100%)';
+        const onEnd = () => {
+          if (!dragging) return;
+          dragging = false;
+          sheetEl.style.transition = 'transform 0.3s cubic-bezier(0.16,1,0.3,1)';
+          if (currentY > 80) {
+            sheetEl.style.transform = 'translateY(110%)';
             setTimeout(() => {
               shiftDetailsPopup.classList.remove('open');
               sheetEl.style.transform = '';
-            }, 300);
+              sheetEl.style.transition = '';
+              sheetEl.style.animation = '';
+            }, 320);
           } else {
-            // Snap back
             sheetEl.style.transform = '';
+            setTimeout(() => {
+              sheetEl.style.transition = '';
+              sheetEl.style.animation = '';
+            }, 300);
           }
-          currentTranslate = 0;
+          currentY = 0;
+        };
+
+        // Touch events (mobile)
+        dragHandle.addEventListener('touchstart', (e) => {
+          onStart(e.touches[0].clientY);
+        }, { passive: true });
+
+        dragHandle.addEventListener('touchmove', (e) => {
+          e.preventDefault(); // Prevent page scroll while dragging handle
+          onMove(e.touches[0].clientY);
+        }, { passive: false });
+
+        dragHandle.addEventListener('touchend', onEnd, { passive: true });
+        dragHandle.addEventListener('touchcancel', onEnd, { passive: true });
+
+        // Mouse events (desktop testing)
+        dragHandle.addEventListener('mousedown', (e) => {
+          onStart(e.clientY);
+          const onMouseMove = (me) => onMove(me.clientY);
+          const onMouseUp = () => {
+            onEnd();
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+          };
+          document.addEventListener('mousemove', onMouseMove);
+          document.addEventListener('mouseup', onMouseUp);
         });
       }
     }
