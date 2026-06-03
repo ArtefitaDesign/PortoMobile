@@ -1136,10 +1136,17 @@ const App = (() => {
   };
 
   const handleAddToCalendar = (title, dateStr, startTime, endTime, sectorName, subSector) => {
-    const formatICSDateTime = (dStr, tStr) => {
+    const parseLocal = (dStr, tStr) => {
       const dp = dStr.split('-');
       const tp = tStr.split(':');
-      return `${dp[0]}${dp[1]}${dp[2]}T${tp[0]}${tp[1]}00`;
+      return new Date(
+        parseInt(dp[0], 10),
+        parseInt(dp[1], 10) - 1,
+        parseInt(dp[2], 10),
+        parseInt(tp[0], 10),
+        parseInt(tp[1], 10),
+        0
+      );
     };
 
     const formatICSDate = (d) => {
@@ -1147,14 +1154,17 @@ const App = (() => {
       return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
     };
 
+    const startDt = parseLocal(dateStr, startTime);
+    const endDt = parseLocal(dateStr, endTime);
+    const startIso = formatICSDate(startDt);
+    const endIso = formatICSDate(endDt);
+
     const loc = `Estádio do Dragão, Porto - Setor ${sectorName} (${subSector})`;
     const descText = `Congresso Internacional Porto 2026\nTurno de Serviço como voluntário no Setor ${sectorName}\nSub-setor: ${subSector}\nHorário: ${startTime} às ${endTime}`;
     
     // Check if the user is on an Android device to use a direct Google Calendar template link
     const isAndroid = /Android/i.test(navigator.userAgent);
     if (isAndroid) {
-      const startIso = formatICSDateTime(dateStr, startTime);
-      const endIso = formatICSDateTime(dateStr, endTime);
       const googleCalendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE` +
         `&text=${encodeURIComponent(title)}` +
         `&dates=${startIso}/${endIso}` +
@@ -1171,8 +1181,8 @@ const App = (() => {
         'BEGIN:VEVENT',
         `UID:${Date.now()}-${Math.random()}@porto2026`,
         `DTSTAMP:${formatICSDate(new Date())}`,
-        `DTSTART:${formatICSDateTime(dateStr, startTime)}`,
-        `DTEND:${formatICSDateTime(dateStr, endTime)}`,
+        `DTSTART:${startIso}`,
+        `DTEND:${endIso}`,
         `SUMMARY:${title}`,
         `LOCATION:${loc}`,
         `DESCRIPTION:${desc}`,
