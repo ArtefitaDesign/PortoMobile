@@ -13,6 +13,7 @@ const App = (() => {
   let activeDateFilter = 'all';
   let countdownInterval = null;
   let backgroundSyncInterval = null;
+  let lastSyncCheckTime = 0;
 
   // Cache keys
   const CACHE_KEY_DB = 'porto2026_mobile_db';
@@ -65,6 +66,13 @@ const App = (() => {
 
   // Initializer
   const init = () => {
+
+    // Register Service Worker for offline capabilities
+    if ('serviceWorker' in navigator && window.location.protocol !== 'file:') {
+      navigator.serviceWorker.register('./sw.js')
+        .then(reg => console.log('[Service Worker] Registered successfully', reg.scope))
+        .catch(err => console.warn('[Service Worker] Registration failed', err));
+    }
 
     // Clear any previous custom logo to enforce new default logo
     localStorage.removeItem('porto2026_custom_logo');
@@ -180,13 +188,30 @@ const App = (() => {
       
       // Try to sync with server quietly if online
       if (window.location.protocol !== 'file:') {
-        fetch('./porto2026_mobile.enc')
-          .then(res => { if (res.ok) return res.text(); })
-          .then(text => {
-            if (text && text !== savedGlobalEnc) {
-              localStorage.setItem('porto2026_global_enc', text);
-              encryptedText = text;
-              console.log("Database synced with server.");
+        fetch('./porto2026_mobile.enc', { method: 'HEAD' })
+          .then(res => {
+            if (res.ok) {
+              const newVersion = res.headers.get('ETag') || res.headers.get('Last-Modified') || res.headers.get('Content-Length');
+              const savedVersion = localStorage.getItem('porto2026_global_enc_version');
+              if (savedVersion && newVersion === savedVersion) {
+                return null; // No changes
+              }
+              return newVersion || 'new';
+            }
+            return null;
+          })
+          .then(newVersion => {
+            if (newVersion) {
+              return fetch('./porto2026_mobile.enc')
+                .then(res => { if (res.ok) return res.text(); })
+                .then(text => {
+                  if (text && text !== savedGlobalEnc) {
+                    localStorage.setItem('porto2026_global_enc', text);
+                    localStorage.setItem('porto2026_global_enc_version', newVersion);
+                    encryptedText = text;
+                    console.log("Database synced with server.");
+                  }
+                });
             }
           }).catch(() => {});
       }
@@ -204,6 +229,10 @@ const App = (() => {
         .then(response => {
           clearTimeout(timeoutId);
           if (!response.ok) throw new Error("Offline");
+          const version = response.headers.get('ETag') || response.headers.get('Last-Modified') || response.headers.get('Content-Length');
+          if (version) {
+            localStorage.setItem('porto2026_global_enc_version', version);
+          }
           return response.text();
         })
         .then(text => {
@@ -560,6 +589,10 @@ const App = (() => {
       .then(response => {
         clearTimeout(timeoutId);
         if (!response.ok) throw new Error("Offline");
+        const version = response.headers.get('ETag') || response.headers.get('Last-Modified') || response.headers.get('Content-Length');
+        if (version) {
+          localStorage.setItem('porto2026_global_enc_version', version);
+        }
         return response.text();
       })
       .then(text => {
@@ -629,6 +662,7 @@ const App = (() => {
 
       // Save locally
       localStorage.setItem('porto2026_global_enc', text);
+      localStorage.removeItem('porto2026_global_enc_version'); // Invalidate version key to trigger fresh HEAD fetch
       encryptedText = text;
       
       // Enable login page fields
@@ -709,46 +743,81 @@ const App = (() => {
     startBackgroundSync();
   };
 
-  const startBackgroundSync = () => {
-    if (backgroundSyncInterval) clearInterval(backgroundSyncInterval);
-    
-    // Background quiet synchronization interval (every 3 minutes = 180000ms)
-    backgroundSyncInterval = setInterval(async () => {
-      if (window.location.protocol === 'file:' || !currentUser || !currentUser.phone) return;
+  const performSilentSyncCheck = async () => {
+    if (window.location.protocol === 'file:' || !currentUser || !currentUser.phone) return;
 
-      try {
-        const res = await fetch('./porto2026_mobile.enc?_nocache=' + Date.now());
-        if (!res.ok) return;
-        const text = await res.text();
-        
-        const savedGlobalEnc = localStorage.getItem('porto2026_global_enc');
-        if (text && text !== savedGlobalEnc) {
-          // A new scales file exists! Decrypt it silently in the background
-          const decryptedText = await decryptContainer(text, currentUser.phone);
-          const parsedDb = JSON.parse(decryptedText);
-          
-          const newMe = parsedDb.volunteers.find(v => String(v.id) === String(currentUser.id));
-          if (newMe) {
-            // Detect scale changes before silently updating database cache
-            detectScaleChanges(parsedDb);
+    // Throttle checks to at most once every 5 minutes (300000ms) to protect server & save data
+    const now = Date.now();
+    if (now - lastSyncCheckTime < 300000) return;
+    lastSyncCheckTime = now;
 
-            db = parsedDb;
-            currentUser = newMe;
-            
-            // Silently cache updated version
-            localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
-            localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
-            localStorage.setItem('porto2026_global_enc', text);
-            
-            // Re-render user dashboard immediately with alterations highlighted!
-            renderRoleDashboard();
-            console.log("Dashboard silently synchronized with latest GitHub scales update!");
-          }
-        }
-      } catch (err) {
-        console.warn("Silent background sync skipped", err);
+    try {
+      const nocacheUrl = './porto2026_mobile.enc?_nocache=' + now;
+      
+      // 1. Perform a lightweight HEAD request first
+      const headRes = await fetch(nocacheUrl, { method: 'HEAD' });
+      if (!headRes.ok) return;
+      
+      const newVersion = headRes.headers.get('ETag') || headRes.headers.get('Last-Modified') || headRes.headers.get('Content-Length');
+      const savedVersion = localStorage.getItem('porto2026_global_enc_version');
+      
+      if (savedVersion && newVersion === savedVersion) {
+        // No changes on server, save bandwidth!
+        return;
       }
-    }, 180000);
+
+      // 2. Fetch the full file only if version changed
+      const res = await fetch(nocacheUrl);
+      if (!res.ok) return;
+      const text = await res.text();
+      
+      const savedGlobalEnc = localStorage.getItem('porto2026_global_enc');
+      if (text && text !== savedGlobalEnc) {
+        // A new scales file exists! Decrypt it silently in the background
+        const decryptedText = await decryptContainer(text, currentUser.phone);
+        const parsedDb = JSON.parse(decryptedText);
+        
+        const newMe = parsedDb.volunteers.find(v => String(v.id) === String(currentUser.id));
+        if (newMe) {
+          // Detect scale changes before silently updating database cache
+          detectScaleChanges(parsedDb);
+
+          db = parsedDb;
+          currentUser = newMe;
+          
+          // Silently cache updated version
+          localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
+          localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
+          
+          // Also store the raw global text so that subsequent page refreshes don't sync
+          localStorage.setItem('porto2026_global_enc', text);
+          if (newVersion) {
+            localStorage.setItem('porto2026_global_enc_version', newVersion);
+          }
+          
+          // Re-render user dashboard immediately with alterations highlighted!
+          renderRoleDashboard();
+          console.log("Dashboard silently synchronized with latest GitHub scales update!");
+        }
+      }
+    } catch (err) {
+      console.warn("Silent background sync skipped", err);
+    }
+  };
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') {
+      performSilentSyncCheck();
+    }
+  };
+
+  const startBackgroundSync = () => {
+    // Perform checking when app becomes active/visible
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Also perform a check right now upon dashboard display
+    performSilentSyncCheck();
   };
 
   // Observations Popups inside mobile PWA
