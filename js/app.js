@@ -885,7 +885,9 @@ const App = (() => {
 
   // Dashboard Rendering based on user database roles
   const renderRoleDashboard = () => {
+    try {
     dashboardContent.innerHTML = '';
+    
     
     if (countdownInterval) {
       clearInterval(countdownInterval);
@@ -1134,10 +1136,20 @@ const App = (() => {
     document.querySelectorAll('.btn-add-cal').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const { title, date, start, end, sec, sub } = btn.dataset;
+        const title = btn.dataset.title;
+        const date = btn.dataset.date;
+        const start = btn.dataset.start;
+        const end = btn.dataset.end;
+        const sec = btn.dataset.sec;
+        const sub = btn.dataset.sub;
         handleAddToCalendar(title, date, start, end, sec, sub);
       });
     });
+    } catch(err) {
+      // Fallback for Safari/iOS errors - show content via simpler path
+      console.error('renderRoleDashboard error:', err);
+      dashboardContent.innerHTML = `<div style="padding:20px;text-align:center;color:var(--danger);font-weight:700;font-size:14px;">⚠️ Erro ao carregar o painel.<br><span style="font-size:12px;font-weight:400;color:var(--text-secondary);">${String(err)}</span><br><br><button onclick="location.reload()" style="background:var(--primary);color:white;border:none;padding:10px 20px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Recarregar</button></div>`;
+    }
   };
 
   const handleAddToCalendar = (title, dateStr, startTime, endTime, sectorName, subSector) => {
