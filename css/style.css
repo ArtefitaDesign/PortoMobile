@@ -434,6 +434,12 @@ body.dark-theme .scale-card.new-alert p, body.dark-theme .scale-card.new-alert d
   padding-top: 0;
 }
 
+.app-content {
+  display: block;
+  flex: 1;
+  width: 100%;
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;
