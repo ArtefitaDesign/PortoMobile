@@ -11,6 +11,8 @@ const App = (() => {
   let currentUser = null;
   let encryptedText = null;
   let activeDateFilter = 'all';
+  let countdownInterval = null;
+  let backgroundSyncInterval = null;
 
   // Cache keys
   const CACHE_KEY_DB = 'porto2026_mobile_db';
@@ -48,6 +50,11 @@ const App = (() => {
   const btnLogout = document.getElementById('btnLogout');
   const dashboardContent = document.getElementById('dashboardContent');
   
+  const shiftDetailsPopup = document.getElementById('shiftDetailsPopup');
+  const closeShiftDetailsPopup = document.getElementById('closeShiftDetailsPopup');
+  const popupSectorName = document.getElementById('popupSectorName');
+  const popupBodyContent = document.getElementById('popupBodyContent');
+  
   const obsModal = document.getElementById('obsModal');
   const obsModalText = document.getElementById('obsModalText');
   const closeObsModal = document.getElementById('closeObsModal');
@@ -58,6 +65,7 @@ const App = (() => {
 
   // Initializer
   const init = () => {
+
     // Clear any previous custom logo to enforce new default logo
     localStorage.removeItem('porto2026_custom_logo');
 
@@ -87,6 +95,16 @@ const App = (() => {
       encFileInp.addEventListener('change', handleFileSelect);
     }
 
+    // iOS fix: when keyboard appears the input can jump outside the login card.
+    // Wait for the keyboard to fully open (~350ms) then scroll the input into view.
+    if (loginPhone) {
+      loginPhone.addEventListener('focus', () => {
+        setTimeout(() => {
+          loginPhone.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 350);
+      });
+    }
+
     // Bind Admin events
     btnAdminAccess.addEventListener('click', () => {
       adminPasswordInput.value = '';
@@ -113,6 +131,14 @@ const App = (() => {
     closeObsModal.addEventListener('click', () => obsModal.classList.remove('open'));
     obsModal.addEventListener('click', (e) => { if (e.target === obsModal) obsModal.classList.remove('open'); });
     cancelUserSelect.addEventListener('click', () => userSelectModal.classList.remove('open'));
+    
+    if (closeShiftDetailsPopup) {
+      closeShiftDetailsPopup.addEventListener('click', () => shiftDetailsPopup.classList.remove('open'));
+    }
+    if (shiftDetailsPopup) {
+      // Tap backdrop to close
+      shiftDetailsPopup.addEventListener('click', (e) => { if (e.target === shiftDetailsPopup) shiftDetailsPopup.classList.remove('open'); });
+    }
 
     // 1. Check if we already have a cached decrypted session
     const cachedDb = localStorage.getItem(CACHE_KEY_DB);
@@ -122,6 +148,15 @@ const App = (() => {
       try {
         db = JSON.parse(cachedDb);
         currentUser = JSON.parse(cachedUser);
+        
+        // Cache session start timestamp
+        if (!sessionStorage.getItem('porto2026_session_start_time')) {
+          const lastSeen = localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0';
+          const sessionStart = lastSeen !== '0' ? lastSeen : Date.now().toString();
+          sessionStorage.setItem('porto2026_session_start_time', sessionStart);
+          localStorage.setItem(`porto2026_last_seen_${currentUser.id}`, Date.now().toString());
+        }
+        
         showDashboard();
         return; // Now it is safe to return because event listeners are already bound!
       } catch (err) {
@@ -162,8 +197,12 @@ const App = (() => {
     if (window.location.protocol === 'file:') {
       updateLoginStatus('Modo Local. Por favor, aceda ao Painel de Administração para carregar o ficheiro .enc.', 'danger');
     } else {
-      fetch('./porto2026_mobile.enc')
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+      fetch('./porto2026_mobile.enc', { signal: controller.signal })
         .then(response => {
+          clearTimeout(timeoutId);
           if (!response.ok) throw new Error("Offline");
           return response.text();
         })
@@ -175,6 +214,7 @@ const App = (() => {
           updateLoginStatus('Introduza o seu número de telemóvel para entrar.', 'info');
         })
         .catch(err => {
+          clearTimeout(timeoutId);
           console.warn("Auto-fetch failed", err);
           updateLoginStatus('⚠️ Nenhuma base de dados ativa. Aceda ao Painel de Administração para carregar as escalas.', 'danger');
         });
@@ -200,19 +240,40 @@ const App = (() => {
 
   // Returns a wa.me-compatible phone number, preserving existing country codes.
   // If the number already starts with + or 00, strips the + and uses it directly.
-  // Otherwise, prepends 351 (Portugal) as the default.
+  // If exactly 9 digits, it is a local Portuguese number, so we prepend 351.
+  // Otherwise, it already contains the country code, so we use it directly.
   const waPhone = (raw) => {
-    const digits = String(raw || '').trim();
-    // Already has a + prefix: +351..., +34..., etc.
-    if (digits.startsWith('+')) {
-      return digits.slice(1).replace(/[^0-9]/g, '');
+    const cleanRaw = String(raw || '').trim();
+    let digits = cleanRaw.replace(/[^0-9]/g, '');
+    
+    if (cleanRaw.startsWith('+')) {
+      return digits;
     }
-    // Already has 00 prefix: 00351..., 0034..., etc.
     if (digits.startsWith('00')) {
-      return digits.slice(2).replace(/[^0-9]/g, '');
+      return digits.slice(2);
     }
-    // No country code — assume Portuguese (+351)
-    return '351' + digits.replace(/[^0-9]/g, '');
+    if (digits.length === 9) {
+      return '351' + digits;
+    }
+    return digits;
+  };
+
+  // Prepares a tel: href compatible number.
+  // Adds '+' to numbers with a country code if they don't have one.
+  // If exactly 9 digits, prepends '+351'.
+  const makeTelLink = (raw) => {
+    const cleanRaw = String(raw || '').trim();
+    let digits = cleanRaw.replace(/[^0-9]/g, '');
+    if (cleanRaw.startsWith('+')) {
+      return '+' + digits;
+    }
+    if (digits.startsWith('00')) {
+      return '+' + digits.slice(2);
+    }
+    if (digits.length === 9) {
+      return '+351' + digits;
+    }
+    return '+' + digits;
   };
 
   const getWeekDay = (dateStr) => {
@@ -342,25 +403,39 @@ const App = (() => {
   };
 
   const handleLogin = async () => {
-    const phoneInput = loginPhone.value.trim().replace(/\s+/g, '');
+    let phoneInput = loginPhone.value.trim().replace(/\s+/g, '');
 
     if (!phoneInput) {
       updateLoginStatus('Por favor, introduza o seu número de telemóvel.', 'danger');
       return;
     }
 
+    const countryCodeSelect = document.getElementById('countryCodeSelect');
+    const selectedPrefix = countryCodeSelect ? countryCodeSelect.value : '351';
+
+    let cleanPhone = phoneInput.replace(/[^0-9]/g, '');
+
+    // Prepend country code if not already typed
+    if (cleanPhone.length === 9) {
+      cleanPhone = selectedPrefix + cleanPhone;
+    } else if (cleanPhone.length < 9) {
+      cleanPhone = selectedPrefix + cleanPhone;
+    } else if (!cleanPhone.startsWith(selectedPrefix) && !cleanPhone.startsWith('351') && !cleanPhone.startsWith('1')) {
+      cleanPhone = selectedPrefix + cleanPhone;
+    }
+
     updateLoginStatus('A desencriptar base de dados...', 'info');
 
     try {
       // 1. Decrypt raw container
-      const decryptedText = await decryptContainer(encryptedText, phoneInput);
+      const decryptedText = await decryptContainer(encryptedText, cleanPhone);
       const parsedDb = JSON.parse(decryptedText);
 
       // 2. Find volunteer(s) by phone number
-      const cleanPhone = phoneInput.replace(/[^0-9]/g, '');
       const matchingVolunteers = parsedDb.volunteers.filter(v => {
         const dbPhone = (v.phone || '').replace(/[^0-9]/g, '');
-        return dbPhone.endsWith(cleanPhone) && cleanPhone.length >= 8;
+        if (dbPhone.length < 8) return false; // Ignore empty or invalid phone numbers
+        return dbPhone.endsWith(cleanPhone) || cleanPhone.endsWith(dbPhone) || dbPhone === cleanPhone;
       });
 
       if (matchingVolunteers.length === 0) {
@@ -393,6 +468,16 @@ const App = (() => {
           btn.addEventListener('click', () => {
             userSelectModal.classList.remove('open');
             currentUser = v;
+            
+            // Cache session start time
+            const lastSeen = localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0';
+            const sessionStart = lastSeen !== '0' ? lastSeen : Date.now().toString();
+            sessionStorage.setItem('porto2026_session_start_time', sessionStart);
+            localStorage.setItem(`porto2026_last_seen_${currentUser.id}`, Date.now().toString());
+            
+            // Detect scale changes before caching the new database
+            detectScaleChanges(db);
+            
             localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
             localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
             showDashboard();
@@ -404,6 +489,16 @@ const App = (() => {
       } else {
         // Only one volunteer has this phone number
         currentUser = matchingVolunteers[0];
+        
+        // Cache session start time
+        const lastSeen = localStorage.getItem(`porto2026_last_seen_${currentUser.id}`) || '0';
+        const sessionStart = lastSeen !== '0' ? lastSeen : Date.now().toString();
+        sessionStorage.setItem('porto2026_session_start_time', sessionStart);
+        localStorage.setItem(`porto2026_last_seen_${currentUser.id}`, Date.now().toString());
+        
+        // Detect scale changes before caching the new database
+        detectScaleChanges(db);
+        
         localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
         localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
         showDashboard();
@@ -416,10 +511,24 @@ const App = (() => {
   };
 
   const handleLogout = () => {
+    // Before clearing, save the current timestamp as the last seen timestamp
+    if (currentUser) {
+      localStorage.setItem(`porto2026_last_seen_${currentUser.id}`, Date.now().toString());
+    }
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    if (backgroundSyncInterval) {
+      clearInterval(backgroundSyncInterval);
+      backgroundSyncInterval = null;
+    }
+    sessionStorage.removeItem('porto2026_session_start_time');
     localStorage.removeItem(CACHE_KEY_DB);
     localStorage.removeItem(CACHE_KEY_USER);
     db = null;
     currentUser = null;
+    activeDateFilter = 'all'; // Reset active filter to 'all' on logout!
 
     // Reset login form
     loginPhone.value = '';
@@ -444,8 +553,15 @@ const App = (() => {
     btnLogin.disabled = true;
     loginStatusMsg.textContent = 'A ligar ao servidor de escalas...';
     
-    fetch('./porto2026_mobile.enc')
-      .then(response => response.text())
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2500);
+
+    fetch('./porto2026_mobile.enc', { signal: controller.signal })
+      .then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error("Offline");
+        return response.text();
+      })
       .then(text => {
         encryptedText = text;
         localStorage.setItem('porto2026_global_enc', text);
@@ -454,6 +570,7 @@ const App = (() => {
         updateLoginStatus('Introduza o seu número de telemóvel para entrar.', 'info');
       })
       .catch(err => {
+        clearTimeout(timeoutId);
         updateLoginStatus('⚠️ Nenhuma base de dados ativa. Aceda ao Painel de Administração para carregar as escalas.', 'danger');
       });
   };
@@ -571,12 +688,12 @@ const App = (() => {
     if (hr >= 5 && hr < 12) greeting = 'Bom dia';
     else if (hr >= 12 && hr < 20) greeting = 'Boa tarde';
     else greeting = 'Boa noite';
-    if (userGreeting) {
-      userGreeting.textContent = greeting + ',';
-    }
 
-    userName.textContent = currentUser.fullName;
-    userAvatar.textContent = currentUser.fullName.split(' ').map(n => n[0]).slice(0,2).join('').toUpperCase();
+    const firstName = currentUser.fullName.trim().split(' ')[0];
+    userName.textContent = `${greeting}, ${firstName}! 👋`;
+    if (userAvatar) {
+      userAvatar.textContent = currentUser.fullName.split(' ').map(n => n[0]).slice(0,2).join('').toUpperCase();
+    }
 
     // Map DB Role label
     const r = String(currentUser.responsibility || '').toUpperCase();
@@ -587,7 +704,51 @@ const App = (() => {
     else if (currentUser.isSister || r === 'IRM') roleText = 'Irmã';
     userRoleBadge.textContent = roleText;
 
+    detectScaleChanges(db);
     renderRoleDashboard();
+    startBackgroundSync();
+  };
+
+  const startBackgroundSync = () => {
+    if (backgroundSyncInterval) clearInterval(backgroundSyncInterval);
+    
+    // Background quiet synchronization interval (every 3 minutes = 180000ms)
+    backgroundSyncInterval = setInterval(async () => {
+      if (window.location.protocol === 'file:' || !currentUser || !currentUser.phone) return;
+
+      try {
+        const res = await fetch('./porto2026_mobile.enc?_nocache=' + Date.now());
+        if (!res.ok) return;
+        const text = await res.text();
+        
+        const savedGlobalEnc = localStorage.getItem('porto2026_global_enc');
+        if (text && text !== savedGlobalEnc) {
+          // A new scales file exists! Decrypt it silently in the background
+          const decryptedText = await decryptContainer(text, currentUser.phone);
+          const parsedDb = JSON.parse(decryptedText);
+          
+          const newMe = parsedDb.volunteers.find(v => String(v.id) === String(currentUser.id));
+          if (newMe) {
+            // Detect scale changes before silently updating database cache
+            detectScaleChanges(parsedDb);
+
+            db = parsedDb;
+            currentUser = newMe;
+            
+            // Silently cache updated version
+            localStorage.setItem(CACHE_KEY_DB, JSON.stringify(db));
+            localStorage.setItem(CACHE_KEY_USER, JSON.stringify(currentUser));
+            localStorage.setItem('porto2026_global_enc', text);
+            
+            // Re-render user dashboard immediately with alterations highlighted!
+            renderRoleDashboard();
+            console.log("Dashboard silently synchronized with latest GitHub scales update!");
+          }
+        }
+      } catch (err) {
+        console.warn("Silent background sync skipped", err);
+      }
+    }, 180000);
   };
 
   // Observations Popups inside mobile PWA
@@ -596,12 +757,229 @@ const App = (() => {
     obsModal.classList.add('open');
   };
 
+  // Helper to synchronously detect shifts added or altered compared to a previously cached database
+  const detectScaleChanges = (newDb) => {
+    if (!newDb || !currentUser) return;
+    try {
+      const keyLastAssigns = `porto2026_last_assignments_${currentUser.id}`;
+      const oldAssignsStr = localStorage.getItem(keyLastAssigns);
+      
+      const newAssigns = newDb.assignments.filter(a => String(a.volunteerId) === String(currentUser.id));
+      
+      if (oldAssignsStr) {
+        const oldAssigns = JSON.parse(oldAssignsStr);
+        newAssigns.forEach(a => {
+          const oldA = oldAssigns.find(o => o.shiftId === a.shiftId && o.sectorId === a.sectorId);
+          const keyFirstSeen = `porto2026_alert_first_seen_${currentUser.id}_${a.id}`;
+          if (!oldA) {
+            // Assignment is completely NEW!
+            if (!localStorage.getItem(keyFirstSeen)) {
+              localStorage.setItem(keyFirstSeen, Date.now().toString());
+              localStorage.setItem(keyFirstSeen + '_type', 'new');
+            }
+          } else if (a.role !== oldA.role || a.updatedAt !== oldA.updatedAt) {
+            // Assignment was ALTERED!
+            if (!localStorage.getItem(keyFirstSeen)) {
+              localStorage.setItem(keyFirstSeen, Date.now().toString());
+              localStorage.setItem(keyFirstSeen + '_type', 'altered');
+            }
+          }
+        });
+      }
+      
+      // Save current assignments as the last seen ones for the next comparison
+      localStorage.setItem(keyLastAssigns, JSON.stringify(newAssigns));
+    } catch (err) {
+      console.warn("detectScaleChanges error", err);
+    }
+  };
+
+  // Helper to check if a shift has been completed (past its date and end time)
+  const isShiftCompleted = (a) => {
+    if (!db || !db.shifts) return false;
+    const sh = db.shifts.find(s => s.id === a.shiftId);
+    if (!sh) return false;
+    const shiftEnd = new Date(`${sh.date}T${sh.endTime}:00`);
+    return !isNaN(shiftEnd.getTime()) && Date.now() > shiftEnd.getTime();
+  };
+
+  // Helper to render a "done" check icon on the bottom right corner of completed shifts
+  const getCompletedBadgeHtml = (a) => {
+    if (isShiftCompleted(a)) {
+      return `
+        <span style="position: absolute; bottom: 12px; right: 16px; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; background: #0284c7; color: white; border-radius: 50%; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35); pointer-events: none;" title="Concluído">
+          <svg width="10" height="8" viewBox="0 0 10 8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:block;">
+            <polyline points="1.5 4 4 6 8.5 1.5"></polyline>
+          </svg>
+        </span>
+      `;
+    }
+    return '';
+  };
+
+  // Helper to synchronously fetch CSS class names for completed or newly alert shifts
+  const getCardClass = (a) => {
+    if (isShiftCompleted(a)) {
+      return 'completed';
+    }
+    if (!currentUser) return '';
+    const key = `porto2026_alert_first_seen_${currentUser.id}_${a.id}`;
+    const firstSeen = localStorage.getItem(key);
+    if (firstSeen) {
+      const elapsed = Date.now() - parseInt(firstSeen);
+      if (elapsed < 3600000) {
+        const type = localStorage.getItem(key + '_type') || 'new';
+        if (type === 'new') {
+          return 'new-alert';
+        }
+      }
+    }
+    return '';
+  };
+
+  // Helper to determine and track shift change badges (remains active for 1 hour since first visualized)
+  const getChangeBadgeHtml = (a, sessionStart) => {
+    if (!currentUser) return '';
+    const key = `porto2026_alert_first_seen_${currentUser.id}_${a.id}`;
+    const firstSeen = localStorage.getItem(key);
+    if (firstSeen) {
+      const elapsed = Date.now() - parseInt(firstSeen);
+      if (elapsed < 3600000) { // 1 hour in ms
+        const type = localStorage.getItem(key + '_type') || 'new';
+        if (type === 'altered') {
+          return `<span class="badge-change altered">Alterado</span>`;
+        } else {
+          // Yellow box with dark yellow letters and a bell icon
+          return `<span class="badge-change new" style="background: rgba(234, 179, 8, 0.15); color: #854d0e; border: 1px solid rgba(234, 179, 8, 0.3);">🔔 Novo</span>`;
+        }
+      }
+    }
+    return '';
+  };
+
   // Dashboard Rendering based on user database roles
   const renderRoleDashboard = () => {
+    try {
+    const oldCarousel = dashboardContent.querySelector('.carousel-wrapper');
+    const savedScrollLeft = oldCarousel ? oldCarousel.scrollLeft : 0;
+    
     dashboardContent.innerHTML = '';
     
+    
+    if (countdownInterval) {
+      clearInterval(countdownInterval);
+      countdownInterval = null;
+    }
+    
     // Find all assignments for this volunteer
-    const assigns = db.assignments.filter(a => a.volunteerId === currentUser.id);
+    const assigns = db.assignments.filter(a => String(a.volunteerId) === String(currentUser.id));
+
+    // Dynamic Real-time Countdown Banner Engine
+    const nowMs = Date.now();
+    const mappedShifts = assigns.map(a => {
+      const sh = db.shifts.find(s => s.id === a.shiftId);
+      const sec = db.sectors.find(s => s.id === a.sectorId);
+      if (!sh || !sec) return null;
+      const startDt = new Date(sh.date + 'T' + sh.startTime + ':00');
+      const endDt = new Date(sh.date + 'T' + sh.endTime + ':00');
+      return { assign: a, shift: sh, sector: sec, startDt, endDt };
+    }).filter(Boolean).sort((a, b) => a.startDt - b.startDt);
+
+    const activeShift = mappedShifts.find(u => nowMs >= u.startDt.getTime() && nowMs <= u.endDt.getTime());
+    const nextShift = mappedShifts.find(u => u.startDt.getTime() > nowMs);
+
+    // Check if user is Captain or Keyman to disable countdown boxes completely for them
+    const isAssignedAsLeader = db.assignments.some(a => String(a.volunteerId) === String(currentUser.id) && (a.role === 'CAP' || a.role === 'KM'));
+    const isCap = (currentUser.responsibility === 'CAP' || isAssignedAsLeader);
+    const isKm = (currentUser.responsibility === 'KM');
+    const isIndicator = !isCap && !isKm;
+
+    if (isIndicator) {
+      if (activeShift) {
+        const { shift: sh, sector: sec } = activeShift;
+        const activeCard = document.createElement('div');
+        activeCard.className = 'premium-countdown-card mb-4';
+        activeCard.innerHTML = `
+          <div class="scale-card scale-card-accent active-now" style="padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
+            <div style="position: relative; z-index: 1;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--success); background: rgba(16, 185, 129, 0.08); padding: 3px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(16, 185, 129, 0.15);">
+                  <span style="width: 6px; height: 6px; background: var(--success); border-radius: 50%; display: inline-block; animation: pulse-badge 1s infinite;"></span> A Decorrer Agora
+                </span>
+                <span style="font-size: 12px; font-weight: 700; color: var(--success);">Ativo</span>
+              </div>
+              <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin-bottom: 2px;">${esc(sec.name)}</h3>
+              <p style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 0px; font-weight: 500;">
+                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}</span> • 🕒 Termina às ${sh.endTime}
+              </p>
+            </div>
+          </div>
+        `;
+        dashboardContent.appendChild(activeCard);
+      }
+      
+      if (nextShift) {
+        const { shift: sh, sector: sec, startDt } = nextShift;
+        const nextCard = document.createElement('div');
+        nextCard.className = 'premium-countdown-card mb-4';
+        nextCard.innerHTML = `
+          <div class="scale-card scale-card-accent next-shift" style="padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
+            <div style="position: relative; z-index: 1;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--primary); background: var(--primary-light); padding: 3px 8px; border-radius: 12px; border: 1px solid rgba(124, 58, 237, 0.15);">Próximo Turno</span>
+                <span id="countdown-text" style="font-size: 12px; font-weight: 700; color: var(--primary); font-family: monospace;">--h --m --s</span>
+              </div>
+              <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin-bottom: 2px;">${esc(sec.name)}</h3>
+              <p style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
+                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}</span> • 📅 ${getWeekDay(sh.date)}, ${formatDate(sh.date)} às ${sh.startTime}
+              </p>
+              <div style="width: 100%; height: 6px; background: rgba(0, 0, 0, 0.06); border-radius: 3px; overflow: hidden; margin-top: 8px;">
+                <div id="countdown-progress" style="width: 100%; height: 100%; background: var(--success); border-radius: 3px; transition: width 1s linear;"></div>
+              </div>
+            </div>
+          </div>
+        `;
+        dashboardContent.appendChild(nextCard);
+
+        const targetTime = startDt.getTime();
+        const referenceMs = 24 * 60 * 60 * 1000; // 24h progress bar window
+
+        const updateCountdown = () => {
+          const textEl = document.getElementById('countdown-text');
+          const progressEl = document.getElementById('countdown-progress');
+          if (!textEl || !progressEl) return;
+
+          const diff = targetTime - Date.now();
+          if (diff <= 0) {
+            textEl.textContent = 'A começar!';
+            progressEl.style.width = '0%';
+            clearInterval(countdownInterval);
+            setTimeout(renderRoleDashboard, 2000);
+            return;
+          }
+
+          const hours = Math.floor(diff / (1000 * 60 * 60));
+          const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          const secs = Math.floor((diff % (1000 * 60)) / 1000);
+
+          let displayText = '';
+          if (hours > 0) {
+            displayText = `${hours}h ${mins}m ${secs}s`;
+          } else {
+            displayText = `${mins}m ${secs}s`;
+          }
+          textEl.textContent = displayText;
+
+          const pct = Math.max(0, Math.min(100, (1 - (diff / referenceMs)) * 100));
+          progressEl.style.width = `${pct}%`;
+        };
+
+        updateCountdown();
+        countdownInterval = setInterval(updateCountdown, 1000);
+      }
+    }
+    
+
 
     // 1. Find all unique dates across assignments to build the dropdown
     const uniqueDates = [];
@@ -626,33 +1004,65 @@ const App = (() => {
           return sh && sh.date === activeDateFilter;
         });
 
-    // 4. Render Date Filter Dropdown if there are multiple days
-    let filterContainer = null;
+    // 4. Render Date Filter Pills (Horizontal Scrolling - Travel App style) if there are multiple days
     if (uniqueDates.length > 1) {
-      filterContainer = document.createElement('div');
-      filterContainer.className = 'form-group mb-4';
-      filterContainer.style.background = '#ffffff';
-      filterContainer.style.border = '1px solid rgba(0,0,0,0.05)';
-      filterContainer.style.padding = '14px 16px';
-      filterContainer.style.borderRadius = 'var(--radius-lg)';
-      filterContainer.style.boxShadow = 'var(--shadow-card)';
+      const filterSection = document.createElement('div');
+      filterSection.style.margin = '8px 0 18px 0';
       
-      filterContainer.innerHTML = `
-        <label class="form-label" for="dashboardDateSelect" style="display:flex; align-items:center; gap:6px;">
-          <span>📅</span> Selecionar Dia do Congresso
-        </label>
-        <select id="dashboardDateSelect" class="form-input" style="width:100%; margin-top:6px; border-color:rgba(0,0,0,0.08); font-weight:700; color:var(--text-primary); background-color:#f8fafc; cursor:pointer;">
-          <option value="all" ${activeDateFilter === 'all' ? 'selected' : ''}>Todos os Dias (${assigns.length} escalas)</option>
-          ${uniqueDates.map(date => {
-            const count = assigns.filter(a => {
-              const sh = db.shifts.find(s => s.id === a.shiftId);
-              return sh && sh.date === date;
-            }).length;
-            return `<option value="${date}" ${activeDateFilter === date ? 'selected' : ''}>${getWeekDay(date)}, ${formatDate(date)} (${count} escalas)</option>`;
-          }).join('')}
-        </select>
+      const allActive = activeDateFilter === 'all';
+      const allBadge = `<button class="date-pill-btn ${allActive ? 'active' : ''}" data-value="all" style="
+        background: ${allActive ? 'var(--primary)' : '#ffffff'};
+        color: ${allActive ? 'white' : 'var(--text-secondary)'};
+        border: 1.5px solid ${allActive ? 'var(--primary)' : 'rgba(0,0,0,0.08)'};
+        font-weight: 700;
+        font-size: 13.5px;
+        padding: 10px 18px;
+        border-radius: 20px;
+        cursor: pointer;
+        white-space: nowrap;
+        box-shadow: ${allActive ? '0 4px 10px rgba(47, 53, 143, 0.15)' : 'none'};
+        transition: all 0.2s ease;
+      ">
+        Todos os Dias (${assigns.length})
+      </button>`;
+
+      const pillsHtml = uniqueDates.map(date => {
+        const count = assigns.filter(a => {
+          const sh = db.shifts.find(s => s.id === a.shiftId);
+          return sh && sh.date === date;
+        }).length;
+        const isActive = activeDateFilter === date;
+        
+        return `<button class="date-pill-btn ${isActive ? 'active' : ''}" data-value="${date}" style="
+          background: ${isActive ? 'var(--primary)' : '#ffffff'};
+          color: ${isActive ? 'white' : 'var(--text-secondary)'};
+          border: 1.5px solid ${isActive ? 'var(--primary)' : 'rgba(0,0,0,0.08)'};
+          font-weight: 700;
+          font-size: 13.5px;
+          padding: 10px 18px;
+          border-radius: 20px;
+          cursor: pointer;
+          white-space: nowrap;
+          box-shadow: ${isActive ? '0 4px 10px rgba(47, 53, 143, 0.15)' : 'none'};
+          transition: all 0.2s ease;
+        ">
+          ${getWeekDay(date)}, ${formatDate(date)} (${count})
+        </button>`;
+      }).join('');
+
+      filterSection.innerHTML = `
+        <div class="carousel-wrapper" style="display:flex; gap:8px; overflow-x:auto; padding: 4px 16px; margin: 0 -16px; -webkit-overflow-scrolling:touch; scrollbar-width:none;">
+          ${allBadge}
+          ${pillsHtml}
+        </div>
       `;
-      dashboardContent.appendChild(filterContainer);
+      dashboardContent.appendChild(filterSection);
+
+      // Restore scroll position to prevent returning to start of list
+      const newCarousel = filterSection.querySelector('.carousel-wrapper');
+      if (newCarousel) {
+        newCarousel.scrollLeft = savedScrollLeft;
+      }
     }
 
     // 5. Render dashboard role section
@@ -660,10 +1070,7 @@ const App = (() => {
     roleContentContainer.id = 'roleContentContainer';
     dashboardContent.appendChild(roleContentContainer);
 
-    // Dynamic role resolving
-    const isAssignedAsLeader = db.assignments.some(a => a.volunteerId === currentUser.id && (a.role === 'CAP' || a.role === 'KM'));
-    const isCap = (currentUser.responsibility === 'CAP' || isAssignedAsLeader);
-    const isKm = (currentUser.responsibility === 'KM');
+
 
     // We pass filtered assignments to the specific renders!
     if (isKm) {
@@ -674,14 +1081,13 @@ const App = (() => {
       renderIndicatorView(filteredAssigns, roleContentContainer);
     }
 
-    // 6. Bind dropdown change listener
-    const dateSelect = document.getElementById('dashboardDateSelect');
-    if (dateSelect) {
-      dateSelect.addEventListener('change', (e) => {
-        activeDateFilter = e.target.value;
+    // 6. Bind Date Pills change listeners
+    document.querySelectorAll('.date-pill-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeDateFilter = btn.dataset.value;
         renderRoleDashboard();
       });
-    }
+    });
 
     // Bind dynamically rendered events
     document.querySelectorAll('.obs-popup-trigger').forEach(btn => {
@@ -690,6 +1096,202 @@ const App = (() => {
         openRemarksModal(btn.dataset.name, btn.dataset.remarks);
       });
     });
+
+    document.querySelectorAll('.btn-toggle-details').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const targetId = btn.dataset.target;
+        const panel = document.getElementById(targetId);
+        if (panel) {
+          const isHidden = panel.style.display === 'none';
+          panel.style.display = isHidden ? 'block' : 'none';
+          
+          const span = btn.querySelector('span');
+          if (span) {
+            span.textContent = isHidden ? '👥 Ocultar Equipa' : '👥 Ver Equipa';
+          }
+          btn.style.background = isHidden ? 'var(--primary)' : 'var(--primary-light)';
+          btn.style.color = isHidden ? '#ffffff' : 'var(--primary)';
+        }
+      });
+    });
+
+    document.querySelectorAll('.btn-add-cal').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const title = btn.dataset.title;
+        const date = btn.dataset.date;
+        const start = btn.dataset.start;
+        const end = btn.dataset.end;
+        const sec = btn.dataset.sec;
+        const sub = btn.dataset.sub;
+        handleAddToCalendar(title, date, start, end, sec, sub);
+      });
+    });
+    } catch(err) {
+      // Fallback for Safari/iOS errors - show content via simpler path
+      console.error('renderRoleDashboard error:', err);
+      dashboardContent.innerHTML = `<div style="padding:20px;text-align:center;color:var(--danger);font-weight:700;font-size:14px;">⚠️ Erro ao carregar o painel.<br><span style="font-size:12px;font-weight:400;color:var(--text-secondary);">${String(err)}</span><br><br><button onclick="location.reload()" style="background:var(--primary);color:white;border:none;padding:10px 20px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Recarregar</button></div>`;
+    }
+  };
+
+  const handleAddToCalendar = (title, dateStr, startTime, endTime, sectorName, subSector) => {
+    const formatICSDateTime = (dStr, tStr) => {
+      const dp = dStr.split('-');
+      const tp = tStr.split(':');
+      return `${dp[0]}${dp[1]}${dp[2]}T${tp[0]}${tp[1]}00`;
+    };
+
+    const formatICSDate = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+    };
+
+    const loc = `Estádio do Dragão, Porto - Setor ${sectorName} (${subSector})`;
+    const descText = `Congresso Internacional Porto 2026\nTurno de Serviço como voluntário no Setor ${sectorName}\nSub-setor: ${subSector}\nHorário: ${startTime} às ${endTime}`;
+    
+    // Check if the user is on an Android device to use a direct Google Calendar template link
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (isAndroid) {
+      const startIso = formatICSDateTime(dateStr, startTime);
+      const endIso = formatICSDateTime(dateStr, endTime);
+      const googleCalendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE` +
+        `&text=${encodeURIComponent(title)}` +
+        `&dates=${startIso}/${endIso}` +
+        `&details=${encodeURIComponent(descText)}` +
+        `&location=${encodeURIComponent(loc)}`;
+      
+      window.open(googleCalendarUrl, '_blank');
+    } else {
+      const desc = descText.replace(/\n/g, '\\n');
+      const icsContent = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Porto 2026//Escalas//PT',
+        'BEGIN:VEVENT',
+        `UID:${Date.now()}-${Math.random()}@porto2026`,
+        `DTSTAMP:${formatICSDate(new Date())}`,
+        `DTSTART:${formatICSDateTime(dateStr, startTime)}`,
+        `DTEND:${formatICSDateTime(dateStr, endTime)}`,
+        `SUMMARY:${title}`,
+        `LOCATION:${loc}`,
+        `DESCRIPTION:${desc}`,
+        'END:VEVENT',
+        'END:VCALENDAR'
+      ].join('\r\n');
+      
+      const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.setAttribute('download', `${title.replace(/\s+/g, '_')}_${dateStr}.ics`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  // Helper to enable smooth click-and-drag scroll on PC/Desktop browsers
+  const initDragToScroll = () => {
+    document.querySelectorAll('.carousel-wrapper').forEach(slider => {
+      let isDown = false;
+      let startX;
+      let scrollLeft;
+      let moved = false;
+
+      slider.addEventListener('mousedown', (e) => {
+        isDown = true;
+        moved = false;
+        slider.style.cursor = 'grabbing';
+        startX = e.pageX - slider.offsetLeft;
+        scrollLeft = slider.scrollLeft;
+      });
+
+      const stopDragging = () => {
+        if (!isDown) return;
+        isDown = false;
+        slider.style.cursor = 'default';
+      };
+
+      slider.addEventListener('mouseleave', stopDragging);
+      slider.addEventListener('mouseup', () => {
+        if (!isDown) return;
+        isDown = false;
+        slider.style.cursor = 'default';
+        
+        if (moved) {
+          const preventClick = (event) => {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            slider.removeEventListener('click', preventClick, true);
+          };
+          slider.addEventListener('click', preventClick, true);
+        }
+      });
+
+      slider.addEventListener('mousemove', (e) => {
+        if (!isDown) return;
+        const x = e.pageX - slider.offsetLeft;
+        const walk = (x - startX) * 1.5;
+        if (Math.abs(walk) > 5) {
+          moved = true;
+        }
+        e.preventDefault();
+        slider.scrollLeft = scrollLeft - walk;
+      });
+    });
+  };
+
+  // Dynamic Modal Detail Drawer for Mockup 3 Details Sheet
+  const openShiftDetailsPopup = (item, roleText, capsHtml, kmsHtml, teamHtml, buttonsHtml) => {
+    popupSectorName.textContent = item.sector.name;
+    
+    let html = `
+      <div style="margin-bottom: 12px; font-size: 13px;">
+        <span class="scale-subsector" style="font-size: 12px; font-weight: 800; color: var(--danger); display: block; margin-bottom: 2px;">${esc(item.sector.subSector || 'Geral')}</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--text-primary); font-weight: 700; margin-bottom: 6px;">
+          <span>📅 ${getWeekDay(item.shift.date)}, ${formatDate(item.shift.date)}</span>
+          <span>🕒 ${item.shift.startTime} – ${item.shift.endTime}</span>
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary);">
+          Função: <span class="user-role-badge" style="background: var(--primary-light); color: var(--primary); font-weight: 800; border: 1px solid rgba(47, 53, 143, 0.15); padding: 2px 6px; border-radius: 6px; font-size: 10.5px;">${roleText}</span>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 12px; max-height: 45vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+        ${capsHtml || ''}
+        ${kmsHtml || ''}
+        ${teamHtml || ''}
+      </div>
+
+      <div style="margin-top: 8px; border-top: 1.5px solid var(--surface-border); padding-top: 12px; display: flex; justify-content: center;">
+        ${buttonsHtml}
+      </div>
+    `;
+
+    popupBodyContent.innerHTML = html;
+
+    // Bind add-cal action inside bottom sheet modal
+    popupBodyContent.querySelectorAll('.btn-add-cal').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const title = btn.dataset.title;
+        const date = btn.dataset.date;
+        const start = btn.dataset.start;
+        const end = btn.dataset.end;
+        const sec = btn.dataset.sec;
+        const sub = btn.dataset.sub;
+        handleAddToCalendar(title, date, start, end, sec, sub);
+      });
+    });
+
+    // Handle Dynamically Binded Observações
+    popupBodyContent.querySelectorAll('.obs-popup-trigger').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRemarksModal(btn.dataset.name, btn.dataset.remarks);
+      });
+    });
+
+    shiftDetailsPopup.classList.add('open');
   };
 
   // 1. INDICADOR VIEW
@@ -700,6 +1302,8 @@ const App = (() => {
       return;
     }
 
+    const sessionStart = parseInt(sessionStorage.getItem('porto2026_session_start_time') || '0');
+
     // Sort assignments by shift date/time
     const sorted = [...assigns].map(a => {
       const sh = db.shifts.find(s => s.id === a.shiftId);
@@ -708,74 +1312,128 @@ const App = (() => {
     }).filter(x => x.shift && x.sector)
       .sort((a,b) => a.shift.date.localeCompare(b.shift.date) || a.shift.startTime.localeCompare(b.shift.startTime));
 
-    let html = `<h4 class="card-section-title">As Tuas Escalas (${sorted.length})</h4>`;
-
-    sorted.forEach((item, idx) => {
-      const sh = item.shift;
-      const sec = item.sector;
-      const roleText = item.assign.role === 'CAP' ? 'Capitão' : (item.assign.role === 'KM' ? 'Homem-Chave' : 'Indicador');
-
-      // Find Captains of this sector/shift
-      const captains = db.assignments
-        .filter(a => a.shiftId === sh.id && a.sectorId === sec.id && a.role === 'CAP')
-        .map(a => db.volunteers.find(v => v.id === a.volunteerId))
-        .filter(Boolean);
-
-      let capsHtml = '';
-      if (captains.length > 0) {
-        capsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:10px;">
-            <span class="card-section-title">Capitão do teu Turno</span>
-            <div class="vol-row-list">
-              ${captains.map(c => `
-                <div class="vol-row-item">
-                  <div class="vol-name-info">
-                    <span class="vol-name">${esc(c.fullName)}</span>
-                    <span class="vol-cong">${esc(c.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  <div class="vol-actions">
-                    ${c.phone ? `
-                      <a href="tel:${c.phone}" class="btn-action-tactile phone" title="Ligar">📞</a>
-                      <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-tactile wa" title="Enviar WhatsApp">💬</a>
-                    ` : ''}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      html += `
-        <div class="scale-card scale-card-accent">
-          <div class="scale-card-header">
-            <div>
-              <h3>${esc(sec.name)}</h3>
-              <span class="scale-subsector">${esc(sec.subSector || 'Geral')}</span>
-            </div>
-            <span class="scale-time-badge">${sh.startTime}–${sh.endTime}</span>
-          </div>
-          <div class="scale-date-row">
-            📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
-          </div>
-          <div style="font-size:13px; color:var(--text-secondary);">
-            Função: <span class="user-role-badge" style="background:var(--primary-light);color:var(--primary);">${roleText}</span>
-          </div>
-          ${capsHtml}
-        </div>`;
+    // Group sorted items by shift date
+    const groups = {};
+    sorted.forEach(item => {
+      const date = item.shift.date;
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(item);
     });
+    const sortedDates = Object.keys(groups).sort();
 
+    let html = `
+      <p style="font-size:12.5px;color:var(--text-muted);margin: 4px 0 14px 4px;">Desliza para os lados e clica no cartão para ver detalhes</p>
+    `;
+
+    sortedDates.forEach(date => {
+      const dateItems = groups[date];
+      html += `
+        <h4 class="card-section-title" style="margin-left: 4px; margin-top: 16px; font-size: 13px; color: var(--primary); font-weight: 800;">
+          ${getWeekDay(date)}, ${formatDate(date)} (${dateItems.length})
+        </h4>
+        <div class="carousel-wrapper" style="display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px; margin: 0 -16px 16px -16px; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
+      `;
+
+      dateItems.forEach(item => {
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const roleText = a.role === 'CAP' ? 'Capitão' : (a.role === 'KM' ? 'Homem-Chave' : 'Indicador');
+        const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
+        const cardCustomClass = getCardClass(a);
+        const globalIdx = sorted.indexOf(item);
+
+        html += `
+          <div class="scale-card carousel-card ${cardCustomClass}" data-idx="${globalIdx}" style="flex-shrink: 0; width: 280px; cursor: pointer; margin-bottom: 0; position: relative;">
+            <div class="scale-card-header" style="margin-bottom: 8px;">
+              <div>
+                <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+              </div>
+            </div>
+            <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
+              📅 <span>${getWeekDay(sh.date)}, ${formatDate(sh.date)}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
+              🕒 Horário: <strong>${sh.startTime}–${sh.endTime}</strong>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+              Função: <span class="user-role-badge" style="padding: 2px 6px; font-size:11.5px; font-weight: 800;">${roleText}</span>
+            </div>
+            <div style="margin-top: 16px; border-top:1px solid rgba(0,0,0,0.03); padding-top:12px; font-weight: 800; color: var(--primary); font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+              🔎 Ver Detalhes do Turno ›
+            </div>
+            ${getCompletedBadgeHtml(a)}
+          </div>`;
+      });
+
+      html += `</div>`;
+    });
     target.innerHTML = html;
+    initDragToScroll();
+
+    // Bind Carousel Card clicks to open Details Drawer Sheet
+    target.querySelectorAll('.carousel-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const idx = parseInt(card.dataset.idx);
+        const item = sorted[idx];
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const roleText = a.role === 'CAP' ? 'Capitão' : (a.role === 'KM' ? 'Homem-Chave' : 'Indicador');
+
+        // Render Captain info inside details popup
+        const captains = db.assignments
+          .filter(x => x.shiftId === sh.id && x.sectorId === sec.id && x.role === 'CAP')
+          .map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId)))
+          .filter(Boolean);
+
+        let capsHtml = '';
+        if (captains.length > 0) {
+          capsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Capitão do Turno</span>
+              <div class="vol-row-list">
+                ${captains.map(c => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name">${esc(c.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${c.phone ? `
+                      <div class="vol-actions">
+                        <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        const buttonsHtml = `
+          <button class="btn-add-cal btn-primary" data-title="${esc(roleText)} - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
+            📅 Adicionar à minha Agenda
+          </button>
+        `;
+
+        openShiftDetailsPopup(item, roleText, capsHtml, null, null, buttonsHtml);
+      });
+    });
   };
 
-  // 2. CAPITÃO VIEW
+  // 2. CAPTAIN VIEW
   const renderCaptainView = (assigns, container) => {
     const target = container || dashboardContent;
-    
     if (assigns.length === 0) {
       target.innerHTML = renderEmptyState('Nenhum turno associado', 'De momento não estás escalado em nenhum turno ou setor como Capitão para o dia selecionado.');
       return;
     }
 
+    const sessionStart = parseInt(sessionStorage.getItem('porto2026_session_start_time') || '0');
+
+    // Sort assignments by shift date/time
     const sorted = [...assigns].map(a => {
       const sh = db.shifts.find(s => s.id === a.shiftId);
       const sec = db.sectors.find(s => s.id === a.sectorId);
@@ -783,148 +1441,184 @@ const App = (() => {
     }).filter(x => x.shift && x.sector)
       .sort((a,b) => a.shift.date.localeCompare(b.shift.date) || a.shift.startTime.localeCompare(b.shift.startTime));
 
-    let html = `<h4 class="card-section-title">Painel de Capitão (${sorted.length} Escalas)</h4>`;
-
-    sorted.forEach((item, idx) => {
-      const sh = item.shift;
-      const sec = item.sector;
-
-      // Find all team indicators assigned to this same shift and sector
-      const sameSecAssigns = db.assignments.filter(a => a.shiftId === sh.id && a.sectorId === sec.id);
-      
-      const teamInds = sameSecAssigns
-        .filter(a => !a.role || a.role === 'IND')
-        .map(a => db.volunteers.find(v => v.id === a.volunteerId))
-        .filter(Boolean);
-
-      const teamKms = sameSecAssigns
-        .filter(a => a.role === 'KM')
-        .map(a => db.volunteers.find(v => v.id === a.volunteerId))
-        .filter(Boolean);
-
-      const teamCaps = sameSecAssigns
-        .filter(a => a.role === 'CAP' && a.volunteerId !== currentUser.id)
-        .map(a => db.volunteers.find(v => v.id === a.volunteerId))
-        .filter(Boolean);
-
-      let teamHtml = '';
-      if (teamInds.length > 0) {
-        teamHtml = `
-          <div style="margin-top:12px; border-top:1px dashed var(--surface-border); padding-top:10px;">
-            <span class="card-section-title">A tua equipa de Indicadores (${teamInds.length})</span>
-            <div class="vol-row-list">
-              ${teamInds.map(i => {
-                const isSister = !!i.isSister;
-                const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
-                const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
-                const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
-
-                const obsIcon = i.additionalRemarks 
-                  ? `<span class="obs-popup-trigger" data-name="${esc(i.fullName)}" data-remarks="${esc(i.additionalRemarks)}" style="cursor:pointer;font-size:13px;margin-left:4px;" title="Ver Observações">📝</span>` 
-                  : '';
-
-                return `
-                  <div class="vol-row-item">
-                    <div class="vol-name-info">
-                      <div style="display:flex;align-items:center;">
-                        <span class="vol-name">${esc(i.fullName)}</span>
-                        <span class="resp-badge-small ${rClass}">${rLabel}</span>
-                        ${obsIcon}
-                      </div>
-                      <span class="vol-cong">${esc(i.congregation || 'Sem Congregação')}</span>
-                    </div>
-                    <div class="vol-actions">
-                      ${i.phone ? `
-                        <a href="tel:${i.phone}" class="btn-action-tactile phone" title="Ligar">📞</a>
-                        <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-tactile wa" title="Enviar WhatsApp">💬</a>
-                      ` : ''}
-                    </div>
-                  </div>`;
-              }).join('')}
-            </div>
-          </div>`;
-      } else {
-        teamHtml = `<p style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">Nenhum indicador atribuído a este setor ainda.</p>`;
-      }
-
-      let kmsHtml = '';
-      if (teamKms.length > 0) {
-        kmsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:8px;">
-            <span class="card-section-title">Homem-Chave do Turno</span>
-            <div class="vol-row-list">
-              ${teamKms.map(k => `
-                <div class="vol-row-item">
-                  <div class="vol-name-info">
-                    <span class="vol-name">${esc(k.fullName)}</span>
-                    <span class="vol-cong">${esc(k.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  <div class="vol-actions">
-                    ${k.phone ? `
-                      <a href="tel:${k.phone}" class="btn-action-tactile phone" title="Ligar">📞</a>
-                      <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-tactile wa" title="Enviar WhatsApp">💬</a>
-                    ` : ''}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      let capsHtml = '';
-      if (teamCaps.length > 0) {
-        capsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:8px;">
-            <span class="card-section-title">Co-Capitão do Setor (${teamCaps.length})</span>
-            <div class="vol-row-list">
-              ${teamCaps.map(c => `
-                <div class="vol-row-item">
-                  <div class="vol-name-info">
-                    <span class="vol-name">${esc(c.fullName)}</span>
-                    <span class="vol-cong">${esc(c.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  <div class="vol-actions">
-                    ${c.phone ? `
-                      <a href="tel:${c.phone}" class="btn-action-tactile phone" title="Ligar">📞</a>
-                      <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-tactile wa" title="Enviar WhatsApp">💬</a>
-                    ` : ''}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      html += `
-        <div class="scale-card">
-          <div class="scale-card-header">
-            <div>
-              <h3>${esc(sec.name)}</h3>
-              <span class="scale-subsector">${esc(sec.subSector || 'Geral')}</span>
-            </div>
-            <span class="scale-time-badge">${sh.startTime}–${sh.endTime}</span>
-          </div>
-          <div class="scale-date-row">
-            📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
-          </div>
-          ${capsHtml}
-          ${kmsHtml}
-          ${teamHtml}
-        </div>`;
+    // Group sorted items by shift date
+    const groups = {};
+    sorted.forEach(item => {
+      const date = item.shift.date;
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(item);
     });
+    const sortedDates = Object.keys(groups).sort();
 
+    let html = `
+      <p style="font-size:12.5px;color:var(--text-muted);margin: 4px 0 14px 4px;">Desliza para os lados e clica no cartão para gerir a equipa</p>
+    `;
+
+    sortedDates.forEach(date => {
+      const dateItems = groups[date];
+      html += `
+        <h4 class="card-section-title" style="margin-left: 4px; margin-top: 16px; font-size: 13px; color: var(--primary); font-weight: 800;">
+          ${getWeekDay(date)}, ${formatDate(date)} (${dateItems.length})
+        </h4>
+        <div class="carousel-wrapper" style="display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px; margin: 0 -16px 16px -16px; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
+      `;
+
+      dateItems.forEach(item => {
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
+        const cardCustomClass = getCardClass(a);
+        const globalIdx = sorted.indexOf(item);
+
+        html += `
+          <div class="scale-card carousel-card ${cardCustomClass}" data-idx="${globalIdx}" style="flex-shrink: 0; width: 280px; cursor: pointer; margin-bottom: 0; position: relative;">
+            <div class="scale-card-header" style="margin-bottom: 8px;">
+              <div>
+                <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+              </div>
+            </div>
+            <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
+              📅 <span>${getWeekDay(sh.date)}, ${formatDate(sh.date)}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
+              🕒 Horário: <strong>${sh.startTime}–${sh.endTime}</strong>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+              Função: <span class="user-role-badge" style="padding: 2px 6px; font-size:11.5px; font-weight: 800; background:var(--primary-light); color:var(--primary);">Capitão</span>
+            </div>
+            <div style="margin-top: 16px; border-top:1px solid rgba(0,0,0,0.03); padding-top:12px; font-weight: 800; color: var(--primary); font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+              👥 Gerir Equipa & Contactos ›
+            </div>
+            ${getCompletedBadgeHtml(a)}
+          </div>`;
+      });
+
+      html += `</div>`;
+    });
     target.innerHTML = html;
+    initDragToScroll();
+
+    // Bind Captain Carousel Cards
+    target.querySelectorAll('.carousel-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const idx = parseInt(card.dataset.idx);
+        const item = sorted[idx];
+        const sh = item.shift;
+        const sec = item.sector;
+
+        // Find indicators assigned
+        const sameSecAssigns = db.assignments.filter(x => x.shiftId === sh.id && x.sectorId === sec.id);
+        const teamInds = sameSecAssigns.filter(x => !x.role || x.role === 'IND').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamKms = sameSecAssigns.filter(x => x.role === 'KM').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamCaps = sameSecAssigns.filter(x => x.role === 'CAP' && String(x.volunteerId) !== String(currentUser.id)).map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+
+        let teamHtml = '';
+        if (teamInds.length > 0) {
+          teamHtml = `
+            <div>
+              <span class="card-section-title" style="color: var(--info); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Equipa de Indicadores (${teamInds.length})</span>
+              <div class="vol-row-list">
+                ${teamInds.map(i => {
+                  const isSister = !!i.isSister;
+                  const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
+                  const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                  const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+
+                  return `
+                    <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                      <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                          <span class="vol-name" style="font-size:13.5px;">${esc(i.fullName)}</span>
+                          <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
+                        </div>
+                        <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
+                      </div>
+                      ${i.phone ? `
+                        <div class="vol-actions" style="margin-top: 2px;">
+                          <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                          <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                        </div>
+                      ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                    </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+        } else {
+          teamHtml = `<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Nenhum indicador atribuído a este setor ainda.</p>`;
+        }
+
+        let kmsHtml = '';
+        if (teamKms.length > 0) {
+          kmsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Homem-Chave</span>
+              <div class="vol-row-list">
+                ${teamKms.map(k => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(k.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${k.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(k.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        let capsHtml = '';
+        if (teamCaps.length > 0) {
+          capsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Co-Capitão do Setor (${teamCaps.length})</span>
+              <div class="vol-row-list">
+                ${teamCaps.map(c => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(c.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${c.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        const buttonsHtml = `
+          <button class="btn-add-cal btn-primary" data-title="Capitão - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
+            📅 Adicionar à minha Agenda
+          </button>
+        `;
+
+        openShiftDetailsPopup(item, 'Capitão', capsHtml, kmsHtml, teamHtml, buttonsHtml);
+      });
+    });
   };
 
   // 3. HOMEM-CHAVE VIEW
   const renderKeymanView = (assigns, container) => {
     const target = container || dashboardContent;
-
     if (assigns.length === 0) {
       target.innerHTML = renderEmptyState('Nenhum turno associado', 'De momento não estás atribuído em nenhum turno ou setor como Homem-Chave para o dia selecionado.');
       return;
     }
 
+    const sessionStart = parseInt(sessionStorage.getItem('porto2026_session_start_time') || '0');
+
+    // Sort assignments by shift date/time
     const sorted = [...assigns].map(a => {
       const sh = db.shifts.find(s => s.id === a.shiftId);
       const sec = db.sectors.find(s => s.id === a.sectorId);
@@ -932,107 +1626,171 @@ const App = (() => {
     }).filter(x => x.shift && x.sector)
       .sort((a,b) => a.shift.date.localeCompare(b.shift.date) || a.shift.startTime.localeCompare(b.shift.startTime));
 
-    let html = `<h4 class="card-section-title">Painel de Homem-Chave (${sorted.length} Escalas)</h4>`;
-
-    sorted.forEach((item, idx) => {
-      const sh = item.shift;
-      const sec = item.sector;
-
-      // Find all team indicators and captains assigned to this same shift and sector
-      const sameSecAssigns = db.assignments.filter(a => a.shiftId === sh.id && a.sectorId === sec.id);
-      
-      const teamInds = sameSecAssigns
-        .filter(a => !a.role || a.role === 'IND')
-        .map(a => db.volunteers.find(v => v.id === a.volunteerId))
-        .filter(Boolean);
-
-      const teamCaps = sameSecAssigns
-        .filter(a => a.role === 'CAP')
-        .map(a => db.volunteers.find(v => v.id === a.volunteerId))
-        .filter(Boolean);
-
-      let capsHtml = '';
-      if (teamCaps.length > 0) {
-        capsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:8px;">
-            <span class="card-section-title">Capitão(es) do Setor (${teamCaps.length})</span>
-            <div class="vol-row-list">
-              ${teamCaps.map(c => `
-                <div class="vol-row-item">
-                  <div class="vol-name-info">
-                    <span class="vol-name">${esc(c.fullName)}</span>
-                    <span class="vol-cong">${esc(c.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  <div class="vol-actions">
-                    ${c.phone ? `
-                      <a href="tel:${c.phone}" class="btn-action-tactile phone" title="Ligar">📞</a>
-                      <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-tactile wa" title="Enviar WhatsApp">💬</a>
-                    ` : ''}
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      let teamHtml = '';
-      if (teamInds.length > 0) {
-        teamHtml = `
-          <div style="margin-top:12px; border-top:1px dashed var(--surface-border); padding-top:10px;">
-            <span class="card-section-title">Indicadores do Setor (${teamInds.length})</span>
-            <div class="vol-row-list">
-              ${teamInds.map(i => {
-                const isSister = !!i.isSister;
-                const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
-                const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
-                const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
-
-                const obsIcon = i.additionalRemarks 
-                  ? `<span class="obs-popup-trigger" data-name="${esc(i.fullName)}" data-remarks="${esc(i.additionalRemarks)}" style="cursor:pointer;font-size:13px;margin-left:4px;" title="Ver Observações">📝</span>` 
-                  : '';
-
-                return `
-                  <div class="vol-row-item">
-                    <div class="vol-name-info">
-                      <div style="display:flex;align-items:center;">
-                        <span class="vol-name">${esc(i.fullName)}</span>
-                        <span class="resp-badge-small ${rClass}">${rLabel}</span>
-                        ${obsIcon}
-                      </div>
-                      <span class="vol-cong">${esc(i.congregation || 'Sem Congregação')}</span>
-                    </div>
-                    <div class="vol-actions">
-                      ${i.phone ? `
-                        <a href="tel:${i.phone}" class="btn-action-tactile phone" title="Ligar">📞</a>
-                        <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-tactile wa" title="Enviar WhatsApp">💬</a>
-                      ` : ''}
-                    </div>
-                  </div>`;
-              }).join('')}
-            </div>
-          </div>`;
-      } else {
-        teamHtml = `<p style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">Nenhum indicador atribuído a este setor ainda.</p>`;
-      }
-
-      html += `
-        <div class="scale-card scale-card-accent" style="border-left-color:var(--warning);">
-          <div class="scale-card-header">
-            <div>
-              <h3>${esc(sec.name)}</h3>
-              <span class="scale-subsector">${esc(sec.subSector || 'Geral')}</span>
-            </div>
-            <span class="scale-time-badge">${sh.startTime}–${sh.endTime}</span>
-          </div>
-          <div class="scale-date-row">
-            📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
-          </div>
-          ${capsHtml}
-          ${teamHtml}
-        </div>`;
+    // Group sorted items by shift date
+    const groups = {};
+    sorted.forEach(item => {
+      const date = item.shift.date;
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(item);
     });
+    const sortedDates = Object.keys(groups).sort();
 
+    let html = `
+      <p style="font-size:12.5px;color:var(--text-muted);margin: 4px 0 14px 4px;">Desliza para os lados e clica no cartão para gerir a equipa</p>
+    `;
+
+    sortedDates.forEach(date => {
+      const dateItems = groups[date];
+      html += `
+        <h4 class="card-section-title" style="margin-left: 4px; margin-top: 16px; font-size: 13px; color: var(--primary); font-weight: 800;">
+          ${getWeekDay(date)}, ${formatDate(date)} (${dateItems.length})
+        </h4>
+        <div class="carousel-wrapper" style="display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px; margin: 0 -16px 16px -16px; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
+      `;
+
+      dateItems.forEach(item => {
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
+        const cardCustomClass = getCardClass(a);
+        const globalIdx = sorted.indexOf(item);
+
+        html += `
+          <div class="scale-card carousel-card ${cardCustomClass}" data-idx="${globalIdx}" style="flex-shrink: 0; width: 280px; cursor: pointer; margin-bottom: 0; position: relative;">
+            <div class="scale-card-header" style="margin-bottom: 8px;">
+              <div>
+                <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+              </div>
+            </div>
+            <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
+              📅 <span>${getWeekDay(sh.date)}, ${formatDate(sh.date)}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
+              🕒 Horário: <strong>${sh.startTime}–${sh.endTime}</strong>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+              Função: <span class="user-role-badge" style="padding: 2px 6px; font-size:11.5px; font-weight: 800; background:var(--warning-light); color:var(--warning); border-color: rgba(217, 119, 6, 0.15);">Homem-Chave</span>
+            </div>
+            <div style="margin-top: 16px; border-top:1px solid rgba(0,0,0,0.03); padding-top:12px; font-weight: 800; color: var(--primary); font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+              👥 Gerir Equipa & Contactos ›
+            </div>
+            ${getCompletedBadgeHtml(a)}
+          </div>`;
+      });
+
+      html += `</div>`;
+    });
     target.innerHTML = html;
+    initDragToScroll();
+
+    // Bind Carousel Cards
+    target.querySelectorAll('.carousel-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const idx = parseInt(card.dataset.idx);
+        const item = sorted[idx];
+        const sh = item.shift;
+        const sec = item.sector;
+
+        // Find indicators, captains and other keymen assigned to same sector/shift
+        const sameSecAssigns = db.assignments.filter(x => x.shiftId === sh.id && x.sectorId === sec.id);
+        const teamInds = sameSecAssigns.filter(x => !x.role || x.role === 'IND').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamKms = sameSecAssigns.filter(x => x.role === 'KM' && String(x.volunteerId) !== String(currentUser.id)).map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamCaps = sameSecAssigns.filter(x => x.role === 'CAP').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+
+        let teamHtml = '';
+        if (teamInds.length > 0) {
+          teamHtml = `
+            <div>
+              <span class="card-section-title" style="color: var(--info); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Equipa de Indicadores (${teamInds.length})</span>
+              <div class="vol-row-list">
+                ${teamInds.map(i => {
+                  const isSister = !!i.isSister;
+                  const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
+                  const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                  const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+
+                  return `
+                    <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                      <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                          <span class="vol-name" style="font-size:13.5px;">${esc(i.fullName)}</span>
+                          <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
+                        </div>
+                        <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
+                      </div>
+                      ${i.phone ? `
+                        <div class="vol-actions" style="margin-top: 2px;">
+                          <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                          <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                        </div>
+                      ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                    </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+        } else {
+          teamHtml = `<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Nenhum indicador atribuído a este setor ainda.</p>`;
+        }
+
+        let kmsHtml = '';
+        if (teamKms.length > 0) {
+          kmsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Co-Homem-Chave (${teamKms.length})</span>
+              <div class="vol-row-list">
+                ${teamKms.map(k => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(k.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${k.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(k.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        let capsHtml = '';
+        if (teamCaps.length > 0) {
+          capsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Capitão do Setor (${teamCaps.length})</span>
+              <div class="vol-row-list">
+                ${teamCaps.map(c => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(c.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${c.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        const buttonsHtml = `
+          <button class="btn-add-cal btn-primary" data-title="Homem-Chave - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
+            📅 Adicionar à minha Agenda
+          </button>
+        `;
+
+        openShiftDetailsPopup(item, 'Homem-Chave', capsHtml, kmsHtml, teamHtml, buttonsHtml);
+      });
+    });
   };
 
   const renderEmptyState = (title, msg) => `
@@ -1049,3 +1807,5 @@ const App = (() => {
 
 // Initialize when page loads
 window.addEventListener('DOMContentLoaded', App.init);
+
+// Save last seen timestamp when volunteer closes PWA or refreshes (removed to prevent sessionStart reset on simple reload)
