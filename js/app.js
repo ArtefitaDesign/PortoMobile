@@ -1144,7 +1144,7 @@ const App = (() => {
 
     const formatICSDate = (d) => {
       const pad = (n) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+      return `${d.getUTCFullYear()}${pad(d.getUTCMonth()+1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
     };
 
     const loc = `Estádio do Dragão, Porto - Setor ${sectorName} (${subSector})`;
