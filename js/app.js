@@ -163,7 +163,49 @@ const App = (() => {
       closeShiftDetailsPopup.addEventListener('click', () => shiftDetailsPopup.classList.remove('open'));
     }
     if (shiftDetailsPopup) {
+      // Tap backdrop to close
       shiftDetailsPopup.addEventListener('click', (e) => { if (e.target === shiftDetailsPopup) shiftDetailsPopup.classList.remove('open'); });
+
+      // Swipe-down-to-dismiss (native iOS feel)
+      const sheetEl = shiftDetailsPopup.querySelector('.bottom-sheet');
+      if (sheetEl) {
+        let touchStartY = 0;
+        let currentTranslate = 0;
+        let isDragging = false;
+
+        sheetEl.addEventListener('touchstart', (e) => {
+          touchStartY = e.touches[0].clientY;
+          currentTranslate = 0;
+          isDragging = true;
+          sheetEl.style.transition = 'none';
+        }, { passive: true });
+
+        sheetEl.addEventListener('touchmove', (e) => {
+          if (!isDragging) return;
+          const delta = e.touches[0].clientY - touchStartY;
+          if (delta > 0) {
+            currentTranslate = delta;
+            sheetEl.style.transform = `translateY(${delta}px)`;
+          }
+        }, { passive: true });
+
+        sheetEl.addEventListener('touchend', () => {
+          isDragging = false;
+          sheetEl.style.transition = '';
+          if (currentTranslate > 80) {
+            // Swipe far enough — dismiss
+            sheetEl.style.transform = 'translateY(100%)';
+            setTimeout(() => {
+              shiftDetailsPopup.classList.remove('open');
+              sheetEl.style.transform = '';
+            }, 300);
+          } else {
+            // Snap back
+            sheetEl.style.transform = '';
+          }
+          currentTranslate = 0;
+        });
+      }
     }
 
     // 1. Check if we already have a cached decrypted session

@@ -167,8 +167,12 @@ body.dark-theme {
    PAGE 1: LOGIN STYLING
    ========================================================================== */
 #pageLogin {
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-top: max(40px, env(safe-area-inset-top, 20px));
+  padding-bottom: max(40px, env(safe-area-inset-bottom, 20px));
 }
 
 .login-box {
