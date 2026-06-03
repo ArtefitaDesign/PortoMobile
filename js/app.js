@@ -1178,6 +1178,8 @@ const App = (() => {
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
         'PRODID:-//Porto 2026//Escalas//PT',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
         'BEGIN:VEVENT',
         `UID:${Date.now()}-${Math.random()}@porto2026`,
         `DTSTAMP:${formatICSDate(new Date())}`,
