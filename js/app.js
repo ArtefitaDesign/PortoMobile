@@ -50,6 +50,11 @@ const App = (() => {
   const btnLogout = document.getElementById('btnLogout');
   const dashboardContent = document.getElementById('dashboardContent');
   
+  const shiftDetailsPopup = document.getElementById('shiftDetailsPopup');
+  const closeShiftDetailsPopup = document.getElementById('closeShiftDetailsPopup');
+  const popupSectorName = document.getElementById('popupSectorName');
+  const popupBodyContent = document.getElementById('popupBodyContent');
+  
   const obsModal = document.getElementById('obsModal');
   const obsModalText = document.getElementById('obsModalText');
   const closeObsModal = document.getElementById('closeObsModal');
@@ -58,8 +63,46 @@ const App = (() => {
   const userSelectContainer = document.getElementById('userSelectContainer');
   const cancelUserSelect = document.getElementById('cancelUserSelect');
 
+  // Initialize light/dark theme preference
+  const initTheme = () => {
+    const getToggles = () => [
+      document.getElementById('btnThemeToggle'),
+      document.getElementById('btnThemeToggleLogin')
+    ].filter(Boolean);
+
+    const applyTheme = (theme) => {
+      const toggles = getToggles();
+      if (theme === 'dark') {
+        document.body.classList.add('dark-theme');
+        toggles.forEach(btn => btn.textContent = '☀️');
+      } else {
+        document.body.classList.remove('dark-theme');
+        toggles.forEach(btn => btn.textContent = '🌙');
+      }
+    };
+
+    const savedTheme = localStorage.getItem('porto2026_theme');
+    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = savedTheme || (systemPrefersDark ? 'dark' : 'light');
+    applyTheme(initialTheme);
+
+    // Delegate theme toggles dynamically
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('#btnThemeToggle, #btnThemeToggleLogin');
+      if (btn) {
+        const isDark = document.body.classList.toggle('dark-theme');
+        const newTheme = isDark ? 'dark' : 'light';
+        localStorage.setItem('porto2026_theme', newTheme);
+        applyTheme(newTheme);
+      }
+    });
+  };
+
   // Initializer
   const init = () => {
+    // Initialize theme first
+    initTheme();
+
     // Clear any previous custom logo to enforce new default logo
     localStorage.removeItem('porto2026_custom_logo');
 
@@ -115,6 +158,13 @@ const App = (() => {
     closeObsModal.addEventListener('click', () => obsModal.classList.remove('open'));
     obsModal.addEventListener('click', (e) => { if (e.target === obsModal) obsModal.classList.remove('open'); });
     cancelUserSelect.addEventListener('click', () => userSelectModal.classList.remove('open'));
+    
+    if (closeShiftDetailsPopup) {
+      closeShiftDetailsPopup.addEventListener('click', () => shiftDetailsPopup.classList.remove('open'));
+    }
+    if (shiftDetailsPopup) {
+      shiftDetailsPopup.addEventListener('click', (e) => { if (e.target === shiftDetailsPopup) shiftDetailsPopup.classList.remove('open'); });
+    }
 
     // 1. Check if we already have a cached decrypted session
     const cachedDb = localStorage.getItem(CACHE_KEY_DB);
@@ -664,12 +714,12 @@ const App = (() => {
     if (hr >= 5 && hr < 12) greeting = 'Bom dia';
     else if (hr >= 12 && hr < 20) greeting = 'Boa tarde';
     else greeting = 'Boa noite';
-    if (userGreeting) {
-      userGreeting.textContent = greeting + ',';
-    }
 
-    userName.textContent = currentUser.fullName;
-    userAvatar.textContent = currentUser.fullName.split(' ').map(n => n[0]).slice(0,2).join('').toUpperCase();
+    const firstName = currentUser.fullName.trim().split(' ')[0];
+    userName.textContent = `${greeting}, ${firstName}! 👋`;
+    if (userAvatar) {
+      userAvatar.textContent = currentUser.fullName.split(' ').map(n => n[0]).slice(0,2).join('').toUpperCase();
+    }
 
     // Map DB Role label
     const r = String(currentUser.responsibility || '').toUpperCase();
@@ -770,8 +820,34 @@ const App = (() => {
     }
   };
 
-  // Helper to synchronously fetch premium card styles for newly detected shifts (light yellow background, golden left border)
-  const getCardStyle = (a) => {
+  // Helper to check if a shift has been completed (past its date and end time)
+  const isShiftCompleted = (a) => {
+    if (!db || !db.shifts) return false;
+    const sh = db.shifts.find(s => s.id === a.shiftId);
+    if (!sh) return false;
+    const shiftEnd = new Date(`${sh.date}T${sh.endTime}:00`);
+    return !isNaN(shiftEnd.getTime()) && Date.now() > shiftEnd.getTime();
+  };
+
+  // Helper to render a "done" check icon on the bottom right corner of completed shifts
+  const getCompletedBadgeHtml = (a) => {
+    if (isShiftCompleted(a)) {
+      return `
+        <span style="position: absolute; bottom: 12px; right: 16px; display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; background: #0284c7; color: white; border-radius: 50%; box-shadow: 0 2px 8px rgba(2, 132, 199, 0.35); pointer-events: none;" title="Concluído">
+          <svg width="10" height="8" viewBox="0 0 10 8" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="display:block;">
+            <polyline points="1.5 4 4 6 8.5 1.5"></polyline>
+          </svg>
+        </span>
+      `;
+    }
+    return '';
+  };
+
+  // Helper to synchronously fetch CSS class names for completed or newly alert shifts
+  const getCardClass = (a) => {
+    if (isShiftCompleted(a)) {
+      return 'completed';
+    }
     if (!currentUser) return '';
     const key = `porto2026_alert_first_seen_${currentUser.id}_${a.id}`;
     const firstSeen = localStorage.getItem(key);
@@ -780,7 +856,7 @@ const App = (() => {
       if (elapsed < 3600000) {
         const type = localStorage.getItem(key + '_type') || 'new';
         if (type === 'new') {
-          return `background: #fefce8; border-color: rgba(234, 179, 8, 0.15); border-left-color: #ca8a04 !important;`;
+          return 'new-alert';
         }
       }
     }
@@ -845,7 +921,7 @@ const App = (() => {
         const activeCard = document.createElement('div');
         activeCard.className = 'premium-countdown-card mb-4';
         activeCard.innerHTML = `
-          <div class="scale-card scale-card-accent" style="border-left-color: var(--success); background: #f0fdf4; border: 1px solid rgba(22, 163, 74, 0.15); padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
+          <div class="scale-card scale-card-accent active-now" style="padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
             <div style="position: relative; z-index: 1;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--success); background: rgba(16, 185, 129, 0.08); padding: 3px 8px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; border: 1px solid rgba(16, 185, 129, 0.15);">
@@ -868,7 +944,7 @@ const App = (() => {
         const nextCard = document.createElement('div');
         nextCard.className = 'premium-countdown-card mb-4';
         nextCard.innerHTML = `
-          <div class="scale-card scale-card-accent" style="border-left-color: var(--primary); background: #fffbeb; border: 1px solid rgba(217, 119, 6, 0.12); padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
+          <div class="scale-card scale-card-accent next-shift" style="padding: 18px 20px; box-shadow: var(--shadow-card); position: relative; overflow: hidden;">
             <div style="position: relative; z-index: 1;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--primary); background: var(--primary-light); padding: 3px 8px; border-radius: 12px; border: 1px solid rgba(124, 58, 237, 0.15);">Próximo Turno</span>
@@ -949,33 +1025,59 @@ const App = (() => {
           return sh && sh.date === activeDateFilter;
         });
 
-    // 4. Render Date Filter Dropdown if there are multiple days
-    let filterContainer = null;
+    // 4. Render Date Filter Pills (Horizontal Scrolling - Travel App style) if there are multiple days
     if (uniqueDates.length > 1) {
-      filterContainer = document.createElement('div');
-      filterContainer.className = 'form-group mb-4';
-      filterContainer.style.background = '#ffffff';
-      filterContainer.style.border = '1px solid rgba(0,0,0,0.05)';
-      filterContainer.style.padding = '14px 16px';
-      filterContainer.style.borderRadius = 'var(--radius-lg)';
-      filterContainer.style.boxShadow = 'var(--shadow-card)';
+      const filterSection = document.createElement('div');
+      filterSection.style.margin = '8px 0 18px 0';
       
-      filterContainer.innerHTML = `
-        <label class="form-label" for="dashboardDateSelect" style="display:flex; align-items:center; gap:6px;">
-          <span>📅</span> Selecionar Dia do Congresso
-        </label>
-        <select id="dashboardDateSelect" class="form-input" style="width:100%; margin-top:6px; border-color:rgba(0,0,0,0.08); font-weight:700; color:var(--text-primary); background-color:#f8fafc; cursor:pointer;">
-          <option value="all" ${activeDateFilter === 'all' ? 'selected' : ''}>Todos os Dias (${assigns.length} escalas)</option>
-          ${uniqueDates.map(date => {
-            const count = assigns.filter(a => {
-              const sh = db.shifts.find(s => s.id === a.shiftId);
-              return sh && sh.date === date;
-            }).length;
-            return `<option value="${date}" ${activeDateFilter === date ? 'selected' : ''}>${getWeekDay(date)}, ${formatDate(date)} (${count} escalas)</option>`;
-          }).join('')}
-        </select>
+      const allActive = activeDateFilter === 'all';
+      const allBadge = `<button class="date-pill-btn ${allActive ? 'active' : ''}" data-value="all" style="
+        background: ${allActive ? 'var(--primary)' : '#ffffff'};
+        color: ${allActive ? 'white' : 'var(--text-secondary)'};
+        border: 1.5px solid ${allActive ? 'var(--primary)' : 'rgba(0,0,0,0.08)'};
+        font-weight: 700;
+        font-size: 13.5px;
+        padding: 10px 18px;
+        border-radius: 20px;
+        cursor: pointer;
+        white-space: nowrap;
+        box-shadow: ${allActive ? '0 4px 10px rgba(47, 53, 143, 0.15)' : 'none'};
+        transition: all 0.2s ease;
+      ">
+        Todos os Dias (${assigns.length})
+      </button>`;
+
+      const pillsHtml = uniqueDates.map(date => {
+        const count = assigns.filter(a => {
+          const sh = db.shifts.find(s => s.id === a.shiftId);
+          return sh && sh.date === date;
+        }).length;
+        const isActive = activeDateFilter === date;
+        
+        return `<button class="date-pill-btn ${isActive ? 'active' : ''}" data-value="${date}" style="
+          background: ${isActive ? 'var(--primary)' : '#ffffff'};
+          color: ${isActive ? 'white' : 'var(--text-secondary)'};
+          border: 1.5px solid ${isActive ? 'var(--primary)' : 'rgba(0,0,0,0.08)'};
+          font-weight: 700;
+          font-size: 13.5px;
+          padding: 10px 18px;
+          border-radius: 20px;
+          cursor: pointer;
+          white-space: nowrap;
+          box-shadow: ${isActive ? '0 4px 10px rgba(47, 53, 143, 0.15)' : 'none'};
+          transition: all 0.2s ease;
+        ">
+          ${getWeekDay(date)}, ${formatDate(date)} (${count})
+        </button>`;
+      }).join('');
+
+      filterSection.innerHTML = `
+        <div class="carousel-wrapper" style="display:flex; gap:8px; overflow-x:auto; padding: 4px 16px; margin: 0 -16px; -webkit-overflow-scrolling:touch; scrollbar-width:none;">
+          ${allBadge}
+          ${pillsHtml}
+        </div>
       `;
-      dashboardContent.appendChild(filterContainer);
+      dashboardContent.appendChild(filterSection);
     }
 
     // 5. Render dashboard role section
@@ -994,14 +1096,13 @@ const App = (() => {
       renderIndicatorView(filteredAssigns, roleContentContainer);
     }
 
-    // 6. Bind dropdown change listener
-    const dateSelect = document.getElementById('dashboardDateSelect');
-    if (dateSelect) {
-      dateSelect.addEventListener('change', (e) => {
-        activeDateFilter = e.target.value;
+    // 6. Bind Date Pills change listeners
+    document.querySelectorAll('.date-pill-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeDateFilter = btn.dataset.value;
         renderRoleDashboard();
       });
-    }
+    });
 
     // Bind dynamically rendered events
     document.querySelectorAll('.obs-popup-trigger').forEach(btn => {
@@ -1069,7 +1170,6 @@ const App = (() => {
       'END:VEVENT',
       'END:VCALENDAR'
     ].join('\r\n');
-
     const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -1077,6 +1177,110 @@ const App = (() => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // Helper to enable smooth click-and-drag scroll on PC/Desktop browsers
+  const initDragToScroll = () => {
+    document.querySelectorAll('.carousel-wrapper').forEach(slider => {
+      let isDown = false;
+      let startX;
+      let scrollLeft;
+      let moved = false;
+
+      slider.addEventListener('mousedown', (e) => {
+        isDown = true;
+        moved = false;
+        slider.style.cursor = 'grabbing';
+        startX = e.pageX - slider.offsetLeft;
+        scrollLeft = slider.scrollLeft;
+      });
+
+      const stopDragging = () => {
+        if (!isDown) return;
+        isDown = false;
+        slider.style.cursor = 'default';
+      };
+
+      slider.addEventListener('mouseleave', stopDragging);
+      slider.addEventListener('mouseup', () => {
+        if (!isDown) return;
+        isDown = false;
+        slider.style.cursor = 'default';
+        
+        if (moved) {
+          const preventClick = (event) => {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            slider.removeEventListener('click', preventClick, true);
+          };
+          slider.addEventListener('click', preventClick, true);
+        }
+      });
+
+      slider.addEventListener('mousemove', (e) => {
+        if (!isDown) return;
+        const x = e.pageX - slider.offsetLeft;
+        const walk = (x - startX) * 1.5;
+        if (Math.abs(walk) > 5) {
+          moved = true;
+        }
+        e.preventDefault();
+        slider.scrollLeft = scrollLeft - walk;
+      });
+    });
+  };
+
+  // Dynamic Modal Detail Drawer for Mockup 3 Details Sheet
+  const openShiftDetailsPopup = (item, roleText, capsHtml, kmsHtml, teamHtml, buttonsHtml) => {
+    popupSectorName.textContent = item.sector.name;
+    
+    let html = `
+      <div style="margin-bottom: 12px; font-size: 13px;">
+        <span class="scale-subsector" style="font-size: 12px; font-weight: 800; color: var(--danger); display: block; margin-bottom: 2px;">${esc(item.sector.subSector || 'Geral')}</span>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--text-primary); font-weight: 700; margin-bottom: 6px;">
+          <span>📅 ${getWeekDay(item.shift.date)}, ${formatDate(item.shift.date)}</span>
+          <span>🕒 ${item.shift.startTime} – ${item.shift.endTime}</span>
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary);">
+          Função: <span class="user-role-badge" style="background: var(--primary-light); color: var(--primary); font-weight: 800; border: 1px solid rgba(47, 53, 143, 0.15); padding: 2px 6px; border-radius: 6px; font-size: 10.5px;">${roleText}</span>
+        </div>
+      </div>
+      
+      <div style="margin-bottom: 12px; max-height: 45vh; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;">
+        ${capsHtml || ''}
+        ${kmsHtml || ''}
+        ${teamHtml || ''}
+      </div>
+
+      <div style="margin-top: 8px; border-top: 1.5px solid var(--surface-border); padding-top: 12px; display: flex; justify-content: center;">
+        ${buttonsHtml}
+      </div>
+    `;
+
+    popupBodyContent.innerHTML = html;
+
+    // Bind add-cal action inside bottom sheet modal
+    popupBodyContent.querySelectorAll('.btn-add-cal').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const title = btn.dataset.title;
+        const date = btn.dataset.date;
+        const start = btn.dataset.start;
+        const end = btn.dataset.end;
+        const sec = btn.dataset.sec;
+        const sub = btn.dataset.sub;
+        handleAddToCalendar(title, date, start, end, sec, sub);
+      });
+    });
+
+    // Handle Dynamically Binded Observações
+    popupBodyContent.querySelectorAll('.obs-popup-trigger').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRemarksModal(btn.dataset.name, btn.dataset.remarks);
+      });
+    });
+
+    shiftDetailsPopup.classList.add('open');
   };
 
   // 1. INDICADOR VIEW
@@ -1097,102 +1301,120 @@ const App = (() => {
     }).filter(x => x.shift && x.sector)
       .sort((a,b) => a.shift.date.localeCompare(b.shift.date) || a.shift.startTime.localeCompare(b.shift.startTime));
 
-    let html = `<h4 class="card-section-title">As Tuas Escalas (${sorted.length})</h4>`;
+    // Group sorted items by shift date
+    const groups = {};
+    sorted.forEach(item => {
+      const date = item.shift.date;
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(item);
+    });
+    const sortedDates = Object.keys(groups).sort();
 
-    sorted.forEach((item, idx) => {
-      const sh = item.shift;
-      const sec = item.sector;
-      const a = item.assign;
-      const roleText = a.role === 'CAP' ? 'Capitão' : (a.role === 'KM' ? 'Homem-Chave' : 'Indicador');
-      const roleBg = a.role === 'CAP' ? 'var(--primary-light)' : (a.role === 'KM' ? 'var(--warning-light)' : 'rgba(2, 132, 199, 0.08)');
-      const roleColor = a.role === 'CAP' ? 'var(--primary)' : (a.role === 'KM' ? 'var(--warning)' : 'var(--info)');
-      const roleBorder = a.role === 'CAP' ? 'rgba(124, 58, 237, 0.15)' : (a.role === 'KM' ? 'rgba(217, 119, 6, 0.15)' : 'rgba(2, 132, 199, 0.15)');
+    let html = `
+      <p style="font-size:12.5px;color:var(--text-muted);margin: 4px 0 14px 4px;">Desliza para os lados e clica no cartão para ver detalhes</p>
+    `;
 
-      const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
-
-      // Find Captains of this sector/shift
-      const captains = db.assignments
-        .filter(a => a.shiftId === sh.id && a.sectorId === sec.id && a.role === 'CAP')
-        .map(a => db.volunteers.find(v => String(v.id) === String(a.volunteerId)))
-        .filter(Boolean);
-
-      let capsHtml = '';
-      if (captains.length > 0) {
-        capsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:10px;">
-            <span class="card-section-title" style="color: var(--primary); font-weight: 800;">Capitão do teu Turno</span>
-            <div class="vol-row-list">
-              ${captains.map(c => `
-                <div class="vol-row-item" style="display:flex; flex-direction:column; gap:8px; align-items:stretch; padding:12px 14px;">
-                  <div style="display:flex; flex-direction:column; gap:2px;">
-                    <span class="vol-name" style="font-size:14px; font-weight:700; color:var(--text-primary); line-height:1.2;">${esc(c.fullName)}</span>
-                    <span class="vol-cong" style="font-size:11px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  ${c.phone ? `
-                    <div class="vol-actions" style="display:flex; gap:8px; justify-content:flex-end; margin-top:2px;">
-                      <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
-                      <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
-                    </div>
-                  ` : `
-                    <div style="font-size:10.5px; color:var(--danger); font-weight:600; margin-top:2px;">⚠️ Sem telemóvel</div>
-                  `}
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      const uniqueId = `ind-${sh.id}-${sec.id}`;
-      let detailsHtml = '';
-      if (capsHtml) {
-        detailsHtml = `
-          <div id="details-${uniqueId}" class="shift-details-panel" style="display: none; margin-top: 12px; transition: all 0.3s ease;">
-            ${capsHtml}
-          </div>
-        `;
-      }
-
-      const buttonsHtml = `
-        <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
-          <button class="btn-add-cal" data-title="${esc(roleText)} - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
-            <span>📅 Agenda</span>
-          </button>
-          ${capsHtml ? `
-            <button class="btn-toggle-details" data-target="details-${uniqueId}" style="background: var(--primary-light); color: var(--primary); border: 1px solid rgba(124, 58, 237, 0.12); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
-              <span>👥 Ver Equipa</span>
-            </button>
-          ` : ''}
-        </div>
+    sortedDates.forEach(date => {
+      const dateItems = groups[date];
+      html += `
+        <h4 class="card-section-title" style="margin-left: 4px; margin-top: 16px; font-size: 13px; color: var(--primary); font-weight: 800;">
+          ${getWeekDay(date)}, ${formatDate(date)} (${dateItems.length})
+        </h4>
+        <div class="carousel-wrapper" style="display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px; margin: 0 -16px 16px -16px; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
       `;
 
-      const cardCustomStyle = getCardStyle(a);
-      const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: ${roleColor};`;
-      html += `
-        <div class="scale-card scale-card-accent" style="${borderLeftStyle} ${cardCustomStyle}">
-          <div class="scale-card-header">
-            <div>
-              <h3>${esc(sec.name)} ${changeBadgeHtml}</h3>
-              <span class="scale-subsector">${esc(sec.subSector || 'Geral')}</span>
-            </div>
-            <span class="scale-time-badge" style="background:${roleBg};color:${roleColor};border-color:${roleBorder};">${sh.startTime}–${sh.endTime}</span>
-          </div>
-          <div class="scale-date-row">
-            📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
-          </div>
-          <div style="font-size:13px; color:var(--text-secondary); margin-bottom: 8px;">
-            Função: <span class="user-role-badge" style="background:${roleBg};color:${roleColor};border-color:${roleBorder};">${roleText}</span>
-          </div>
-          ${detailsHtml}
-          ${buttonsHtml}
-        </div>`;
-    });
+      dateItems.forEach(item => {
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const roleText = a.role === 'CAP' ? 'Capitão' : (a.role === 'KM' ? 'Homem-Chave' : 'Indicador');
+        const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
+        const cardCustomClass = getCardClass(a);
+        const globalIdx = sorted.indexOf(item);
 
+        html += `
+          <div class="scale-card carousel-card ${cardCustomClass}" data-idx="${globalIdx}" style="flex-shrink: 0; width: 280px; cursor: pointer; margin-bottom: 0; position: relative;">
+            <div class="scale-card-header" style="margin-bottom: 8px;">
+              <div>
+                <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+              </div>
+            </div>
+            <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
+              📅 <span>${getWeekDay(sh.date)}, ${formatDate(sh.date)}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
+              🕒 Horário: <strong>${sh.startTime}–${sh.endTime}</strong>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+              Função: <span class="user-role-badge" style="padding: 2px 6px; font-size:11.5px; font-weight: 800;">${roleText}</span>
+            </div>
+            <div style="margin-top: 16px; border-top:1px solid rgba(0,0,0,0.03); padding-top:12px; font-weight: 800; color: var(--primary); font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+              🔎 Ver Detalhes do Turno ›
+            </div>
+            ${getCompletedBadgeHtml(a)}
+          </div>`;
+      });
+
+      html += `</div>`;
+    });
     target.innerHTML = html;
+    initDragToScroll();
+
+    // Bind Carousel Card clicks to open Details Drawer Sheet
+    target.querySelectorAll('.carousel-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const idx = parseInt(card.dataset.idx);
+        const item = sorted[idx];
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const roleText = a.role === 'CAP' ? 'Capitão' : (a.role === 'KM' ? 'Homem-Chave' : 'Indicador');
+
+        // Render Captain info inside details popup
+        const captains = db.assignments
+          .filter(x => x.shiftId === sh.id && x.sectorId === sec.id && x.role === 'CAP')
+          .map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId)))
+          .filter(Boolean);
+
+        let capsHtml = '';
+        if (captains.length > 0) {
+          capsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Capitão do Turno</span>
+              <div class="vol-row-list">
+                ${captains.map(c => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name">${esc(c.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${c.phone ? `
+                      <div class="vol-actions">
+                        <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        const buttonsHtml = `
+          <button class="btn-add-cal btn-primary" data-title="${esc(roleText)} - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
+            📅 Adicionar à minha Agenda
+          </button>
+        `;
+
+        openShiftDetailsPopup(item, roleText, capsHtml, null, null, buttonsHtml);
+      });
+    });
   };
 
+  // 2. CAPTAIN VIEW
   const renderCaptainView = (assigns, container) => {
     const target = container || dashboardContent;
-    
     if (assigns.length === 0) {
       target.innerHTML = renderEmptyState('Nenhum turno associado', 'De momento não estás escalado em nenhum turno ou setor como Capitão para o dia selecionado.');
       return;
@@ -1200,6 +1422,7 @@ const App = (() => {
 
     const sessionStart = parseInt(sessionStorage.getItem('porto2026_session_start_time') || '0');
 
+    // Sort assignments by shift date/time
     const sorted = [...assigns].map(a => {
       const sh = db.shifts.find(s => s.id === a.shiftId);
       const sec = db.sectors.find(s => s.id === a.sectorId);
@@ -1207,174 +1430,176 @@ const App = (() => {
     }).filter(x => x.shift && x.sector)
       .sort((a,b) => a.shift.date.localeCompare(b.shift.date) || a.shift.startTime.localeCompare(b.shift.startTime));
 
-    let html = `<h4 class="card-section-title">Painel de Capitão (${sorted.length} Escalas)</h4>`;
+    // Group sorted items by shift date
+    const groups = {};
+    sorted.forEach(item => {
+      const date = item.shift.date;
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(item);
+    });
+    const sortedDates = Object.keys(groups).sort();
 
-    sorted.forEach((item, idx) => {
-      const sh = item.shift;
-      const sec = item.sector;
-      const a = item.assign;
+    let html = `
+      <p style="font-size:12.5px;color:var(--text-muted);margin: 4px 0 14px 4px;">Desliza para os lados e clica no cartão para gerir a equipa</p>
+    `;
 
-      const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
-
-      // Find all team indicators assigned to this same shift and sector
-      const sameSecAssigns = db.assignments.filter(a => a.shiftId === sh.id && a.sectorId === sec.id);
-      
-      const teamInds = sameSecAssigns
-        .filter(a => !a.role || a.role === 'IND')
-        .map(a => db.volunteers.find(v => String(v.id) === String(a.volunteerId)))
-        .filter(Boolean);
-
-      const teamKms = sameSecAssigns
-        .filter(a => a.role === 'KM')
-        .map(a => db.volunteers.find(v => String(v.id) === String(a.volunteerId)))
-        .filter(Boolean);
-
-      const teamCaps = sameSecAssigns
-        .filter(a => a.role === 'CAP' && String(a.volunteerId) !== String(currentUser.id))
-        .map(a => db.volunteers.find(v => String(v.id) === String(a.volunteerId)))
-        .filter(Boolean);
-
-      let teamHtml = '';
-      if (teamInds.length > 0) {
-        teamHtml = `
-          <div style="margin-top:12px; border-top:1px dashed var(--surface-border); padding-top:10px;">
-            <span class="card-section-title" style="color: var(--info); font-weight: 800;">A tua equipa de Indicadores (${teamInds.length})</span>
-            <div class="vol-row-list">
-              ${teamInds.map(i => {
-                const isSister = !!i.isSister;
-                const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
-                const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
-                const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
-
-                return `
-                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:8px; align-items:stretch; padding:12px 14px;">
-                    <div style="display:flex; flex-direction:column; gap:2px;">
-                      <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-                        <span class="vol-name" style="font-size:14px; font-weight:700; color:var(--text-primary); line-height:1.2;">${esc(i.fullName)}</span>
-                        <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9.5px; padding:2px 6px;">${rLabel}</span>
-                      </div>
-                      <span class="vol-cong" style="font-size:11px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
-                    </div>
-                    ${i.phone ? `
-                      <div class="vol-actions" style="display:flex; gap:8px; justify-content:flex-end; margin-top:2px;">
-                        <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
-                        <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
-                      </div>
-                    ` : `
-                      <div style="font-size:10.5px; color:var(--danger); font-weight:600; margin-top:2px;">⚠️ Sem telemóvel</div>
-                    `}
-                  </div>`;
-              }).join('')}
-            </div>
-          </div>`;
-      } else {
-        teamHtml = `<p style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">Nenhum indicador atribuído a este setor ainda.</p>`;
-      }
-
-      let kmsHtml = '';
-      if (teamKms.length > 0) {
-        kmsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:8px;">
-            <span class="card-section-title" style="color: var(--warning); font-weight: 800;">Homem-Chave do Turno</span>
-            <div class="vol-row-list">
-              ${teamKms.map(k => `
-                <div class="vol-row-item" style="display:flex; flex-direction:column; gap:8px; align-items:stretch; padding:12px 14px;">
-                  <div style="display:flex; flex-direction:column; gap:2px;">
-                    <span class="vol-name" style="font-size:14px; font-weight:700; color:var(--text-primary); line-height:1.2;">${esc(k.fullName)}</span>
-                    <span class="vol-cong" style="font-size:11px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  ${k.phone ? `
-                    <div class="vol-actions" style="display:flex; gap:8px; justify-content:flex-end; margin-top:2px;">
-                      <a href="tel:${makeTelLink(k.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
-                      <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
-                    </div>
-                  ` : `
-                    <div style="font-size:10.5px; color:var(--danger); font-weight:600; margin-top:2px;">⚠️ Sem telemóvel</div>
-                  `}
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      let capsHtml = '';
-      if (teamCaps.length > 0) {
-        capsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:8px;">
-            <span class="card-section-title" style="color: var(--primary); font-weight: 800;">Co-Capitão do Setor (${teamCaps.length})</span>
-            <div class="vol-row-list">
-              ${teamCaps.map(c => `
-                <div class="vol-row-item" style="display:flex; flex-direction:column; gap:8px; align-items:stretch; padding:12px 14px;">
-                  <div style="display:flex; flex-direction:column; gap:2px;">
-                    <span class="vol-name" style="font-size:14px; font-weight:700; color:var(--text-primary); line-height:1.2;">${esc(c.fullName)}</span>
-                    <span class="vol-cong" style="font-size:11px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  ${c.phone ? `
-                    <div class="vol-actions" style="display:flex; gap:8px; justify-content:flex-end; margin-top:2px;">
-                      <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
-                      <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
-                    </div>
-                  ` : `
-                    <div style="font-size:10.5px; color:var(--danger); font-weight:600; margin-top:2px;">⚠️ Sem telemóvel</div>
-                  `}
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      const uniqueId = `cap-${sh.id}-${sec.id}`;
-      const hasDetails = capsHtml || kmsHtml || teamHtml;
-      let detailsHtml = '';
-      if (hasDetails) {
-        detailsHtml = `
-          <div id="details-${uniqueId}" class="shift-details-panel" style="display: none; margin-top: 12px; transition: all 0.3s ease;">
-            ${capsHtml}
-            ${kmsHtml}
-            ${teamHtml}
-          </div>
-        `;
-      }
-
-      const buttonsHtml = `
-        <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
-          <button class="btn-add-cal" data-title="Capitão - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
-            <span>📅 Agenda</span>
-          </button>
-          ${hasDetails ? `
-            <button class="btn-toggle-details" data-target="details-${uniqueId}" style="background: var(--primary-light); color: var(--primary); border: 1px solid rgba(124, 58, 237, 0.12); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
-              <span>👥 Ver Equipa</span>
-            </button>
-          ` : ''}
-        </div>
+    sortedDates.forEach(date => {
+      const dateItems = groups[date];
+      html += `
+        <h4 class="card-section-title" style="margin-left: 4px; margin-top: 16px; font-size: 13px; color: var(--primary); font-weight: 800;">
+          ${getWeekDay(date)}, ${formatDate(date)} (${dateItems.length})
+        </h4>
+        <div class="carousel-wrapper" style="display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px; margin: 0 -16px 16px -16px; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
       `;
 
-      const cardCustomStyle = getCardStyle(a);
-      const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: var(--primary);`;
-      html += `
-        <div class="scale-card scale-card-accent" style="${borderLeftStyle} ${cardCustomStyle}">
-          <div class="scale-card-header">
-            <div>
-              <h3>${esc(sec.name)} ${changeBadgeHtml}</h3>
-              <span class="scale-subsector">${esc(sec.subSector || 'Geral')}</span>
-            </div>
-            <span class="scale-time-badge">${sh.startTime}–${sh.endTime}</span>
-          </div>
-          <div class="scale-date-row">
-            📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
-          </div>
-          ${detailsHtml}
-          ${buttonsHtml}
-        </div>`;
-    });
+      dateItems.forEach(item => {
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
+        const cardCustomClass = getCardClass(a);
+        const globalIdx = sorted.indexOf(item);
 
+        html += `
+          <div class="scale-card carousel-card ${cardCustomClass}" data-idx="${globalIdx}" style="flex-shrink: 0; width: 280px; cursor: pointer; margin-bottom: 0; position: relative;">
+            <div class="scale-card-header" style="margin-bottom: 8px;">
+              <div>
+                <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+              </div>
+            </div>
+            <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
+              📅 <span>${getWeekDay(sh.date)}, ${formatDate(sh.date)}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
+              🕒 Horário: <strong>${sh.startTime}–${sh.endTime}</strong>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+              Função: <span class="user-role-badge" style="padding: 2px 6px; font-size:11.5px; font-weight: 800; background:var(--primary-light); color:var(--primary);">Capitão</span>
+            </div>
+            <div style="margin-top: 16px; border-top:1px solid rgba(0,0,0,0.03); padding-top:12px; font-weight: 800; color: var(--primary); font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+              👥 Gerir Equipa & Contactos ›
+            </div>
+            ${getCompletedBadgeHtml(a)}
+          </div>`;
+      });
+
+      html += `</div>`;
+    });
     target.innerHTML = html;
+    initDragToScroll();
+
+    // Bind Captain Carousel Cards
+    target.querySelectorAll('.carousel-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const idx = parseInt(card.dataset.idx);
+        const item = sorted[idx];
+        const sh = item.shift;
+        const sec = item.sector;
+
+        // Find indicators assigned
+        const sameSecAssigns = db.assignments.filter(x => x.shiftId === sh.id && x.sectorId === sec.id);
+        const teamInds = sameSecAssigns.filter(x => !x.role || x.role === 'IND').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamKms = sameSecAssigns.filter(x => x.role === 'KM').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamCaps = sameSecAssigns.filter(x => x.role === 'CAP' && String(x.volunteerId) !== String(currentUser.id)).map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+
+        let teamHtml = '';
+        if (teamInds.length > 0) {
+          teamHtml = `
+            <div>
+              <span class="card-section-title" style="color: var(--info); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Equipa de Indicadores (${teamInds.length})</span>
+              <div class="vol-row-list">
+                ${teamInds.map(i => {
+                  const isSister = !!i.isSister;
+                  const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
+                  const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                  const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+
+                  return `
+                    <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                      <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                          <span class="vol-name" style="font-size:13.5px;">${esc(i.fullName)}</span>
+                          <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
+                        </div>
+                        <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
+                      </div>
+                      ${i.phone ? `
+                        <div class="vol-actions" style="margin-top: 2px;">
+                          <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                          <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                        </div>
+                      ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                    </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+        } else {
+          teamHtml = `<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Nenhum indicador atribuído a este setor ainda.</p>`;
+        }
+
+        let kmsHtml = '';
+        if (teamKms.length > 0) {
+          kmsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Homem-Chave</span>
+              <div class="vol-row-list">
+                ${teamKms.map(k => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(k.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${k.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(k.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        let capsHtml = '';
+        if (teamCaps.length > 0) {
+          capsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Co-Capitão do Setor (${teamCaps.length})</span>
+              <div class="vol-row-list">
+                ${teamCaps.map(c => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(c.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${c.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        const buttonsHtml = `
+          <button class="btn-add-cal btn-primary" data-title="Capitão - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
+            📅 Adicionar à minha Agenda
+          </button>
+        `;
+
+        openShiftDetailsPopup(item, 'Capitão', capsHtml, kmsHtml, teamHtml, buttonsHtml);
+      });
+    });
   };
 
   // 3. HOMEM-CHAVE VIEW
   const renderKeymanView = (assigns, container) => {
     const target = container || dashboardContent;
-
     if (assigns.length === 0) {
       target.innerHTML = renderEmptyState('Nenhum turno associado', 'De momento não estás atribuído em nenhum turno ou setor como Homem-Chave para o dia selecionado.');
       return;
@@ -1382,6 +1607,7 @@ const App = (() => {
 
     const sessionStart = parseInt(sessionStorage.getItem('porto2026_session_start_time') || '0');
 
+    // Sort assignments by shift date/time
     const sorted = [...assigns].map(a => {
       const sh = db.shifts.find(s => s.id === a.shiftId);
       const sec = db.sectors.find(s => s.id === a.sectorId);
@@ -1389,141 +1615,171 @@ const App = (() => {
     }).filter(x => x.shift && x.sector)
       .sort((a,b) => a.shift.date.localeCompare(b.shift.date) || a.shift.startTime.localeCompare(b.shift.startTime));
 
-    let html = `<h4 class="card-section-title">Painel de Homem-Chave (${sorted.length} Escalas)</h4>`;
+    // Group sorted items by shift date
+    const groups = {};
+    sorted.forEach(item => {
+      const date = item.shift.date;
+      if (!groups[date]) groups[date] = [];
+      groups[date].push(item);
+    });
+    const sortedDates = Object.keys(groups).sort();
 
-    sorted.forEach((item, idx) => {
-      const sh = item.shift;
-      const sec = item.sector;
-      const a = item.assign;
+    let html = `
+      <p style="font-size:12.5px;color:var(--text-muted);margin: 4px 0 14px 4px;">Desliza para os lados e clica no cartão para gerir a equipa</p>
+    `;
 
-      const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
-
-      // Find all team indicators and captains assigned to this same shift and sector
-      const sameSecAssigns = db.assignments.filter(a => a.shiftId === sh.id && a.sectorId === sec.id);
-      
-      const teamInds = sameSecAssigns
-        .filter(a => !a.role || a.role === 'IND')
-        .map(a => db.volunteers.find(v => String(v.id) === String(a.volunteerId)))
-        .filter(Boolean);
-
-      const teamCaps = sameSecAssigns
-        .filter(a => a.role === 'CAP')
-        .map(a => db.volunteers.find(v => String(v.id) === String(a.volunteerId)))
-        .filter(Boolean);
-
-      let capsHtml = '';
-      if (teamCaps.length > 0) {
-        capsHtml = `
-          <div style="margin-top:10px; border-top:1px dashed var(--surface-border); padding-top:8px;">
-            <span class="card-section-title" style="color: var(--primary); font-weight: 800;">Capitão(es) do Setor (${teamCaps.length})</span>
-            <div class="vol-row-list">
-              ${teamCaps.map(c => `
-                <div class="vol-row-item" style="display:flex; flex-direction:column; gap:10px; align-items:stretch; padding:14px 16px;">
-                  <div style="display:flex; flex-direction:column; gap:3px;">
-                    <span class="vol-name" style="font-size:14.5px; font-weight:700; color:var(--text-primary); line-height:1.3;">${esc(c.fullName)}</span>
-                    <span class="vol-cong" style="font-size:11px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
-                  </div>
-                  ${c.phone ? `
-                    <div class="vol-actions" style="display:flex; gap:10px; margin-top:4px;">
-                      <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" style="flex:1; justify-content:center; padding:8px 12px; font-size:12px;" title="Ligar">📞 Ligar</a>
-                      <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" style="flex:1; justify-content:center; padding:8px 12px; font-size:12px;" title="Enviar WhatsApp">💬 WhatsApp</a>
-                    </div>
-                  ` : `
-                    <div style="font-size:11px; color:var(--danger); font-weight:600; margin-top:2px;">⚠️ Sem número de telemóvel registado</div>
-                  `}
-                </div>
-              `).join('')}
-            </div>
-          </div>`;
-      }
-
-      let teamHtml = '';
-      if (teamInds.length > 0) {
-        teamHtml = `
-          <div style="margin-top:12px; border-top:1px dashed var(--surface-border); padding-top:10px;">
-            <span class="card-section-title" style="color: var(--info); font-weight: 800;">Indicadores do Setor (${teamInds.length})</span>
-            <div class="vol-row-list">
-              ${teamInds.map(i => {
-                const isSister = !!i.isSister;
-                const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
-                const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
-                const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
-
-                const obsIcon = i.additionalRemarks 
-                  ? `<span class="obs-popup-trigger" data-name="${esc(i.fullName)}" data-remarks="${esc(i.additionalRemarks)}" style="cursor:pointer;font-size:13px;margin-left:4px;" title="Ver Observações">📝</span>` 
-                  : '';
-
-                return `
-                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:10px; align-items:stretch; padding:14px 16px;">
-                    <div style="display:flex; flex-direction:column; gap:3px;">
-                      <div style="display:flex; align-items:center; flex-wrap:wrap; gap:6px;">
-                        <span class="vol-name" style="font-size:14.5px; font-weight:700; color:var(--text-primary); line-height:1.3;">${esc(i.fullName)}</span>
-                        <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9.5px; padding:2px 6px;">${rLabel}</span>
-                        ${obsIcon}
-                      </div>
-                      <span class="vol-cong" style="font-size:11px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
-                    </div>
-                    ${i.phone ? `
-                      <div class="vol-actions" style="display:flex; gap:10px; margin-top:4px;">
-                        <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" style="flex:1; justify-content:center; padding:8px 12px; font-size:12px;" title="Ligar">📞 Ligar</a>
-                        <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" style="flex:1; justify-content:center; padding:8px 12px; font-size:12px;" title="Enviar WhatsApp">💬 WhatsApp</a>
-                      </div>
-                    ` : `
-                      <div style="font-size:11px; color:var(--danger); font-weight:600; margin-top:2px;">⚠️ Sem número de telemóvel registado</div>
-                    `}
-                  </div>`;
-              }).join('')}
-            </div>
-          </div>`;
-      } else {
-        teamHtml = `<p style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">Nenhum indicador atribuído a este setor ainda.</p>`;
-      }
-
-      const uniqueId = `km-${sh.id}-${sec.id}`;
-      const hasDetails = capsHtml || teamHtml;
-      let detailsHtml = '';
-      if (hasDetails) {
-        detailsHtml = `
-          <div id="details-${uniqueId}" class="shift-details-panel" style="display: none; margin-top: 12px; transition: all 0.3s ease;">
-            ${capsHtml}
-            ${teamHtml}
-          </div>
-        `;
-      }
-
-      const buttonsHtml = `
-        <div style="display: flex; justify-content: flex-end; margin-top: 12px; gap: 8px;">
-          <button class="btn-add-cal" data-title="Homem-Chave - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="background: rgba(217,119,6,0.08); color: #d97706; border: 1px solid rgba(217,119,6,0.15); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
-            <span>📅 Agenda</span>
-          </button>
-          ${hasDetails ? `
-            <button class="btn-toggle-details" data-target="details-${uniqueId}" style="background: var(--primary-light); color: var(--primary); border: 1px solid rgba(124, 58, 237, 0.12); padding: 6px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: var(--transition);">
-              <span>👥 Ver Equipa</span>
-            </button>
-          ` : ''}
-        </div>
+    sortedDates.forEach(date => {
+      const dateItems = groups[date];
+      html += `
+        <h4 class="card-section-title" style="margin-left: 4px; margin-top: 16px; font-size: 13px; color: var(--primary); font-weight: 800;">
+          ${getWeekDay(date)}, ${formatDate(date)} (${dateItems.length})
+        </h4>
+        <div class="carousel-wrapper" style="display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px; margin: 0 -16px 16px -16px; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
       `;
 
-      const cardCustomStyle = getCardStyle(a);
-      const borderLeftStyle = cardCustomStyle ? '' : `border-left-color: var(--warning);`;
-      html += `
-        <div class="scale-card scale-card-accent" style="${borderLeftStyle} ${cardCustomStyle}">
-          <div class="scale-card-header">
-            <div>
-              <h3>${esc(sec.name)} ${changeBadgeHtml}</h3>
-              <span class="scale-subsector">${esc(sec.subSector || 'Geral')}</span>
-            </div>
-            <span class="scale-time-badge">${sh.startTime}–${sh.endTime}</span>
-          </div>
-          <div class="scale-date-row">
-            📅 <strong>${getWeekDay(sh.date)}</strong>, ${formatDate(sh.date)}
-          </div>
-          ${detailsHtml}
-          ${buttonsHtml}
-        </div>`;
-    });
+      dateItems.forEach(item => {
+        const sh = item.shift;
+        const sec = item.sector;
+        const a = item.assign;
+        const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
+        const cardCustomClass = getCardClass(a);
+        const globalIdx = sorted.indexOf(item);
 
+        html += `
+          <div class="scale-card carousel-card ${cardCustomClass}" data-idx="${globalIdx}" style="flex-shrink: 0; width: 280px; cursor: pointer; margin-bottom: 0; position: relative;">
+            <div class="scale-card-header" style="margin-bottom: 8px;">
+              <div>
+                <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+              </div>
+            </div>
+            <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
+              📅 <span>${getWeekDay(sh.date)}, ${formatDate(sh.date)}</span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
+              🕒 Horário: <strong>${sh.startTime}–${sh.endTime}</strong>
+            </div>
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+              Função: <span class="user-role-badge" style="padding: 2px 6px; font-size:11.5px; font-weight: 800; background:var(--warning-light); color:var(--warning); border-color: rgba(217, 119, 6, 0.15);">Homem-Chave</span>
+            </div>
+            <div style="margin-top: 16px; border-top:1px solid rgba(0,0,0,0.03); padding-top:12px; font-weight: 800; color: var(--primary); font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
+              👥 Gerir Equipa & Contactos ›
+            </div>
+            ${getCompletedBadgeHtml(a)}
+          </div>`;
+      });
+
+      html += `</div>`;
+    });
     target.innerHTML = html;
+    initDragToScroll();
+
+    // Bind Carousel Cards
+    target.querySelectorAll('.carousel-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const idx = parseInt(card.dataset.idx);
+        const item = sorted[idx];
+        const sh = item.shift;
+        const sec = item.sector;
+
+        // Find indicators, captains and other keymen assigned to same sector/shift
+        const sameSecAssigns = db.assignments.filter(x => x.shiftId === sh.id && x.sectorId === sec.id);
+        const teamInds = sameSecAssigns.filter(x => !x.role || x.role === 'IND').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamKms = sameSecAssigns.filter(x => x.role === 'KM' && String(x.volunteerId) !== String(currentUser.id)).map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamCaps = sameSecAssigns.filter(x => x.role === 'CAP').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+
+        let teamHtml = '';
+        if (teamInds.length > 0) {
+          teamHtml = `
+            <div>
+              <span class="card-section-title" style="color: var(--info); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Equipa de Indicadores (${teamInds.length})</span>
+              <div class="vol-row-list">
+                ${teamInds.map(i => {
+                  const isSister = !!i.isSister;
+                  const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
+                  const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                  const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+
+                  return `
+                    <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                      <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                          <span class="vol-name" style="font-size:13.5px;">${esc(i.fullName)}</span>
+                          <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
+                        </div>
+                        <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
+                      </div>
+                      ${i.phone ? `
+                        <div class="vol-actions" style="margin-top: 2px;">
+                          <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                          <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                        </div>
+                      ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                    </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+        } else {
+          teamHtml = `<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Nenhum indicador atribuído a este setor ainda.</p>`;
+        }
+
+        let kmsHtml = '';
+        if (teamKms.length > 0) {
+          kmsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Co-Homem-Chave (${teamKms.length})</span>
+              <div class="vol-row-list">
+                ${teamKms.map(k => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(k.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${k.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(k.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        let capsHtml = '';
+        if (teamCaps.length > 0) {
+          capsHtml = `
+            <div style="margin-bottom: 8px;">
+              <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Capitão do Setor (${teamCaps.length})</span>
+              <div class="vol-row-list">
+                ${teamCaps.map(c => `
+                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                    <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span class="vol-name" style="font-size:13.5px;">${esc(c.fullName)}</span>
+                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
+                    </div>
+                    ${c.phone ? `
+                      <div class="vol-actions" style="margin-top: 2px;">
+                        <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                        <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                      </div>
+                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                  </div>
+                `).join('')}
+              </div>
+            </div>`;
+        }
+
+        const buttonsHtml = `
+          <button class="btn-add-cal btn-primary" data-title="Homem-Chave - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
+            📅 Adicionar à minha Agenda
+          </button>
+        `;
+
+        openShiftDetailsPopup(item, 'Homem-Chave', capsHtml, kmsHtml, teamHtml, buttonsHtml);
+      });
+    });
   };
 
   const renderEmptyState = (title, msg) => `
