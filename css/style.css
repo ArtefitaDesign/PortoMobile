@@ -905,6 +905,10 @@ body {
   color: var(--text-primary);
   box-shadow: var(--shadow-card);
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  box-sizing: border-box;
   transition: var(--transition);
 }
 

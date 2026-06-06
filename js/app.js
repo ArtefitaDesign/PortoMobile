@@ -381,8 +381,14 @@ const App = (() => {
     );
 
     // 5. Decrypt master key using derived key
-    const keyIvBytes = new Uint8Array(hexToBuf(keyBlock.iv));
-    const keyCtBytes = new Uint8Array(hexToBuf(keyBlock.ct));
+    let keyIvBytes, keyCtBytes;
+    if (typeof keyBlock === 'string') {
+      keyIvBytes = new Uint8Array(hexToBuf(keyBlock.slice(0, 24)));
+      keyCtBytes = new Uint8Array(hexToBuf(keyBlock.slice(24)));
+    } else {
+      keyIvBytes = new Uint8Array(hexToBuf(keyBlock.iv));
+      keyCtBytes = new Uint8Array(hexToBuf(keyBlock.ct));
+    }
 
     const masterKeyBuffer = await window.crypto.subtle.decrypt(
       {
