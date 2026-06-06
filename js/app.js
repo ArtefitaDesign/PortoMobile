@@ -227,7 +227,7 @@ const App = (() => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-      fetch('./porto2026_mobile.enc', { signal: controller.signal })
+      fetch('./porto2026_mobile.enc?_t=' + Date.now(), { signal: controller.signal, cache: 'no-cache' })
         .then(response => {
           clearTimeout(timeoutId);
           if (!response.ok) throw new Error("Offline");
