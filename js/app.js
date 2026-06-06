@@ -1083,8 +1083,8 @@ const App = (() => {
           return sh && sh.date === activeDateFilter;
         });
 
-    // 4. Render Date Filter Pills (Horizontal Scrolling - Travel App style) if there are multiple days
-    if (uniqueDates.length > 1) {
+    // 4. Render Date Filter Pills (Horizontal Scrolling - Travel App style) if there are multiple days (skip for Keyman)
+    if (uniqueDates.length > 1 && !isKm) {
       const filterSection = document.createElement('div');
       filterSection.style.margin = '8px 0 18px 0';
       
@@ -1965,6 +1965,21 @@ const App = (() => {
     // Sort sectors alphabetically
     const sortedSectors = [...db.sectors].sort((a, b) => a.name.localeCompare(b.name));
 
+    // Group sectors by name
+    const sectorsGrouped = [];
+    sortedSectors.forEach(sec => {
+      let group = sectorsGrouped.find(g => g.name === sec.name);
+      if (!group) {
+        group = { name: sec.name, items: [] };
+        sectorsGrouped.push(group);
+      }
+      group.items.push(sec);
+    });
+    // Sort items within each group
+    sectorsGrouped.forEach(group => {
+      group.items.sort((a, b) => (a.subSector || 'Geral').localeCompare(b.subSector || 'Geral'));
+    });
+
     // Filter shifts based on selected sector (if a specific sector is selected)
     let availableShifts = sortedShifts;
     if (activeRdSectorId && activeRdSectorId !== 'all') {
@@ -1985,20 +2000,18 @@ const App = (() => {
     // Get current shift object
     const selectedShift = activeRdShiftId ? db.shifts.find(s => s.id === activeRdShiftId) : null;
 
-    // Build filters HTML with organic custom styles
+    // Build filters HTML with organic custom styles (using custom combobox for Setor)
     let filterHtml = `
       <div class="rd-filters-container">
         <!-- Setor Filter first to drive the Shift options -->
         <div class="rd-filter-group">
           <span class="rd-filter-label">Setor</span>
-          <div class="rd-select-wrapper">
-            <select id="rdFilterSector" class="rd-select-custom">
-              <option value="all" ${activeRdSectorId === 'all' ? 'selected' : ''}>Todos</option>
-              ${sortedSectors.map(sec => {
-                const selectedAttr = sec.id === activeRdSectorId ? 'selected' : '';
-                return `<option value="${sec.id}" ${selectedAttr}>${esc(sec.name)} (${esc(sec.subSector || 'Geral')})</option>`;
-              }).join('')}
-            </select>
+          <div class="rd-combobox" id="rdSectorCombobox">
+            <div class="rd-combobox-input-wrapper">
+              <input type="text" id="rdSectorSearchInput" class="rd-combobox-input" placeholder="Pesquisar setor..." autocomplete="off">
+              <span class="rd-combobox-arrow">▼</span>
+            </div>
+            <div class="rd-combobox-dropdown" id="rdSectorDropdown" style="display: none;"></div>
           </div>
         </div>
 
@@ -2060,17 +2073,103 @@ const App = (() => {
 
     rdViewContent.innerHTML = contentHtml;
 
-    // Attach event listeners to filters to update state and trigger re-render
-    const rdFilterShift = target.querySelector('#rdFilterShift');
-    const rdFilterSector = target.querySelector('#rdFilterSector');
+    // Combobox elements and rendering logic
+    const combobox = target.querySelector('#rdSectorCombobox');
+    const searchInput = target.querySelector('#rdSectorSearchInput');
+    const dropdown = target.querySelector('#rdSectorDropdown');
 
-    rdFilterShift.addEventListener('change', (e) => {
-      activeRdShiftId = e.target.value;
-      renderRdView(target);
+    const renderDropdownItems = (searchTerm = '') => {
+      const term = searchTerm.toLowerCase().trim();
+      let html = '';
+      
+      const allSelected = activeRdSectorId === 'all';
+      if (!term || 'todos'.includes(term)) {
+        html += `<div class="rd-dropdown-item all-option ${allSelected ? 'selected' : ''}" data-value="all">Todos</div>`;
+      }
+      
+      sectorsGrouped.forEach(group => {
+        const filteredItems = group.items.filter(sec => {
+          const label = `${group.name} ${sec.subSector || 'Geral'}`.toLowerCase();
+          return label.includes(term);
+        });
+        
+        if (filteredItems.length > 0) {
+          html += `<div class="rd-dropdown-group">`;
+          html += `<span class="rd-dropdown-group-label">${esc(group.name)}</span>`;
+          filteredItems.forEach(sec => {
+            const isSelected = sec.id === activeRdSectorId;
+            html += `
+              <div class="rd-dropdown-item ${isSelected ? 'selected' : ''}" data-value="${sec.id}">
+                <span>${esc(sec.subSector || 'Geral')}</span>
+              </div>
+            `;
+          });
+          html += `</div>`;
+        }
+      });
+      
+      if (!html) {
+        html = `<div style="padding: 12px; font-size: 13px; color: var(--text-muted); text-align: center;">Nenhum setor encontrado</div>`;
+      }
+      
+      return html;
+    };
+
+    // Set initial input value
+    if (activeRdSectorId === 'all') {
+      searchInput.value = 'Todos';
+    } else {
+      const currentSec = db.sectors.find(s => s.id === activeRdSectorId);
+      if (currentSec) {
+        searchInput.value = `${currentSec.name} (${currentSec.subSector || 'Geral'})`;
+      }
+    }
+
+    // Toggle dropdown
+    searchInput.addEventListener('focus', () => {
+      searchInput.select();
+      dropdown.innerHTML = renderDropdownItems(searchInput.value === 'Todos' ? '' : searchInput.value);
+      dropdown.style.display = 'block';
+      combobox.classList.add('open');
     });
 
-    rdFilterSector.addEventListener('change', (e) => {
-      activeRdSectorId = e.target.value;
+    searchInput.addEventListener('input', (e) => {
+      dropdown.innerHTML = renderDropdownItems(e.target.value);
+    });
+
+    dropdown.addEventListener('click', (e) => {
+      const item = e.target.closest('.rd-dropdown-item');
+      if (item) {
+        const val = item.dataset.value;
+        activeRdSectorId = val;
+        renderRdView(target);
+      }
+    });
+
+    const closeDropdownHandler = (e) => {
+      if (!combobox.contains(e.target)) {
+        dropdown.style.display = 'none';
+        combobox.classList.remove('open');
+        if (activeRdSectorId === 'all') {
+          searchInput.value = 'Todos';
+        } else {
+          const currentSec = db.sectors.find(s => s.id === activeRdSectorId);
+          if (currentSec) {
+            searchInput.value = `${currentSec.name} (${currentSec.subSector || 'Geral'})`;
+          }
+        }
+        document.removeEventListener('click', closeDropdownHandler);
+      }
+    };
+
+    searchInput.addEventListener('focus', () => {
+      document.addEventListener('click', closeDropdownHandler);
+    });
+
+    // Attach event listeners to other filters
+    const rdFilterShift = target.querySelector('#rdFilterShift');
+    rdFilterShift.addEventListener('change', (e) => {
+      activeRdShiftId = e.target.value;
       renderRdView(target);
     });
 
