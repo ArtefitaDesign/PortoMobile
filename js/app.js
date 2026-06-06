@@ -14,6 +14,8 @@ const App = (() => {
   let countdownInterval = null;
   let backgroundSyncInterval = null;
   let lastSyncCheckTime = 0;
+  let activeRdShiftId = '';
+  let activeRdSectorId = 'all';
 
   // Cache keys
   const CACHE_KEY_DB = 'porto2026_mobile_db';
@@ -732,7 +734,8 @@ const App = (() => {
     // Map DB Role label
     const r = String(currentUser.responsibility || '').toUpperCase();
     let roleText = 'Indicador';
-    if (r === 'CAP') roleText = 'Capitão';
+    if (r === 'RD') roleText = 'Responsável de Departamento';
+    else if (r === 'CAP') roleText = 'Capitão';
     else if (r === 'KM') roleText = 'Homem-Chave';
     else if (r.includes('TORNI')) roleText = 'Torniquetes';
     else if (currentUser.isSister || r === 'IRM') roleText = 'Irmã';
@@ -934,10 +937,15 @@ const App = (() => {
     
     dashboardContent.innerHTML = '';
     
-    
     if (countdownInterval) {
       clearInterval(countdownInterval);
       countdownInterval = null;
+    }
+
+    const isRd = (currentUser.responsibility === 'RD');
+    if (isRd) {
+      renderRdView(dashboardContent);
+      return;
     }
     
     // Find all assignments for this volunteer
@@ -965,7 +973,7 @@ const App = (() => {
 
     if (isIndicator) {
       if (activeShift) {
-        const { shift: sh, sector: sec } = activeShift;
+        const { assign: a, shift: sh, sector: sec } = activeShift;
         const activeCard = document.createElement('div');
         activeCard.className = 'premium-countdown-card mb-4';
         activeCard.innerHTML = `
@@ -979,7 +987,7 @@ const App = (() => {
               </div>
               <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin-bottom: 2px;">${esc(sec.name)}</h3>
               <p style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 0px; font-weight: 500;">
-                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}</span> • 🕒 Termina às ${sh.endTime}
+                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}${a.door ? ` • 🚪 ${esc(a.door)}` : ''}</span> • 🕒 Termina às ${sh.endTime}
               </p>
             </div>
           </div>
@@ -988,7 +996,7 @@ const App = (() => {
       }
       
       if (nextShift) {
-        const { shift: sh, sector: sec, startDt } = nextShift;
+        const { assign: a, shift: sh, sector: sec, startDt } = nextShift;
         const nextCard = document.createElement('div');
         nextCard.className = 'premium-countdown-card mb-4';
         nextCard.innerHTML = `
@@ -1000,7 +1008,7 @@ const App = (() => {
               </div>
               <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin-bottom: 2px;">${esc(sec.name)}</h3>
               <p style="font-size: 11.5px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
-                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}</span> • 📅 ${getWeekDay(sh.date)}, ${formatDate(sh.date)} às ${sh.startTime}
+                📍 <span style="color: var(--danger); font-weight: 800; font-size: 13px;">${esc(sec.subSector || 'Geral')}${a.door ? ` • 🚪 ${esc(a.door)}` : ''}</span> • 📅 ${getWeekDay(sh.date)}, ${formatDate(sh.date)} às ${sh.startTime}
               </p>
               <div style="width: 100%; height: 6px; background: rgba(0, 0, 0, 0.06); border-radius: 3px; overflow: hidden; margin-top: 8px;">
                 <div id="countdown-progress" style="width: 100%; height: 100%; background: var(--success); border-radius: 3px; transition: width 1s linear;"></div>
@@ -1009,6 +1017,7 @@ const App = (() => {
           </div>
         `;
         dashboardContent.appendChild(nextCard);
+      }
 
         const targetTime = startDt.getTime();
         const referenceMs = 24 * 60 * 60 * 1000; // 24h progress bar window
@@ -1328,7 +1337,7 @@ const App = (() => {
     
     let html = `
       <div style="margin-bottom: 12px; font-size: 13px;">
-        <span class="scale-subsector" style="font-size: 12px; font-weight: 800; color: var(--danger); display: block; margin-bottom: 2px;">${esc(item.sector.subSector || 'Geral')}</span>
+        <span class="scale-subsector" style="font-size: 12px; font-weight: 800; color: var(--danger); display: block; margin-bottom: 2px;">${esc(item.sector.subSector || 'Geral')}${item.assign.door ? ` • 🚪 ${esc(item.assign.door)}` : ''}</span>
         <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--text-primary); font-weight: 700; margin-bottom: 6px;">
           <span>📅 ${getWeekDay(item.shift.date)}, ${formatDate(item.shift.date)}</span>
           <span>🕒 ${item.shift.startTime} – ${item.shift.endTime}</span>
@@ -1429,7 +1438,7 @@ const App = (() => {
             <div class="scale-card-header" style="margin-bottom: 8px;">
               <div>
                 <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
-                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}${a.door ? ` • 🚪 ${esc(a.door)}` : ''}</span>
               </div>
             </div>
             <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
@@ -1557,7 +1566,7 @@ const App = (() => {
             <div class="scale-card-header" style="margin-bottom: 8px;">
               <div>
                 <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
-                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}${a.door ? ` • 🚪 ${esc(a.door)}` : ''}</span>
               </div>
             </div>
             <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
@@ -1742,7 +1751,7 @@ const App = (() => {
             <div class="scale-card-header" style="margin-bottom: 8px;">
               <div>
                 <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
-                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}</span>
+                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}${a.door ? ` • 🚪 ${esc(a.door)}` : ''}</span>
               </div>
             </div>
             <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
@@ -1871,6 +1880,223 @@ const App = (() => {
 
         openShiftDetailsPopup(item, 'Homem-Chave', capsHtml, kmsHtml, teamHtml, buttonsHtml);
       });
+    });
+  };
+
+  const renderRdVolRow = (v, roleLabel, rClass) => {
+    if (!v) return '';
+    return `
+      <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #ffffff; border-radius: 12px; border: 1px solid rgba(0,0,0,0.03); margin-bottom: 4px;">
+        <div style="display:flex; flex-direction:column; gap:2px;">
+          <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+            <span class="vol-name" style="font-size:13px; font-weight: 700; color: var(--text-primary);">${esc(v.fullName)}</span>
+            <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${roleLabel}</span>
+          </div>
+          <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(v.congregation || 'Sem Congregação')}</span>
+        </div>
+        ${v.phone ? `
+          <div class="vol-actions" style="margin-top: 2px; display: flex; gap: 8px;">
+            <a href="tel:${makeTelLink(v.phone)}" class="btn-action-pill phone" title="Ligar" style="flex: 1; justify-content: center;">📞 Ligar</a>
+            <a href="https://wa.me/${waPhone(v.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp" style="flex: 1; justify-content: center;">💬 WhatsApp</a>
+          </div>
+        ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+      </div>
+    `;
+  };
+
+  const renderRdView = (container) => {
+    const target = container || dashboardContent;
+    
+    // Sort shifts chronologically
+    const sortedShifts = [...db.shifts].sort((a, b) => {
+      const dateDiff = a.date.localeCompare(b.date);
+      if (dateDiff !== 0) return dateDiff;
+      return a.startTime.localeCompare(b.startTime);
+    });
+
+    if (sortedShifts.length === 0) {
+      target.innerHTML = renderEmptyState('Sem turnos cadastrados', 'Não existem turnos disponíveis no sistema.');
+      return;
+    }
+
+    // Default shift if none selected
+    if (!activeRdShiftId || !db.shifts.some(s => s.id === activeRdShiftId)) {
+      activeRdShiftId = sortedShifts[0].id;
+    }
+
+    // Sort sectors alphabetically
+    const sortedSectors = [...db.sectors].sort((a, b) => a.name.localeCompare(b.name));
+
+    // Get current shift object
+    const selectedShift = db.shifts.find(s => s.id === activeRdShiftId);
+
+    // Build filters HTML
+    let filterHtml = `
+      <div class="rd-filters-container" style="display: flex; gap: 10px; margin-bottom: 18px; padding: 0 4px;">
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+          <label style="font-size: 11px; font-weight: 800; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Turno</label>
+          <select id="rdFilterShift" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.08); font-size: 13px; font-weight: 700; background: white; color: var(--text-primary); cursor: pointer; box-shadow: var(--shadow-sm); outline: none;">
+            ${sortedShifts.map(s => {
+              const selectedAttr = s.id === activeRdShiftId ? 'selected' : '';
+              return `<option value="${s.id}" ${selectedAttr}>${getWeekDay(s.date)}, ${formatDate(s.date)} — ${s.startTime} às ${s.endTime}</option>`;
+            }).join('')}
+          </select>
+        </div>
+        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
+          <label style="font-size: 11px; font-weight: 800; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Setor</label>
+          <select id="rdFilterSector" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.08); font-size: 13px; font-weight: 700; background: white; color: var(--text-primary); cursor: pointer; box-shadow: var(--shadow-sm); outline: none;">
+            <option value="all" ${activeRdSectorId === 'all' ? 'selected' : ''}>Todos os Setores</option>
+            ${sortedSectors.map(sec => {
+              const selectedAttr = sec.id === activeRdSectorId ? 'selected' : '';
+              return `<option value="${sec.id}" ${selectedAttr}>${esc(sec.name)} (${esc(sec.subSector || 'Geral')})</option>`;
+            }).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="rdViewContent"></div>
+    `;
+
+    target.innerHTML = filterHtml;
+
+    // Filter assignments for the selected shift and (optionally) sector
+    const activeShiftAssigns = db.assignments.filter(a => a.shiftId === activeRdShiftId);
+    
+    let sectorsToShow = [];
+    if (activeRdSectorId !== 'all') {
+      const sec = db.sectors.find(s => s.id === activeRdSectorId);
+      if (sec) sectorsToShow.push(sec);
+    } else {
+      sectorsToShow = sortedSectors;
+    }
+
+    const rdViewContent = target.querySelector('#rdViewContent');
+    let contentHtml = '';
+
+    if (sectorsToShow.length === 0) {
+      contentHtml = renderEmptyState('Nenhum setor encontrado', 'Não existem setores para exibir.');
+    } else {
+      sectorsToShow.forEach(sec => {
+        const secAssigns = activeShiftAssigns.filter(a => a.sectorId === sec.id);
+        
+        // Find Captains and Keymen
+        const capAssigns = secAssigns.filter(a => a.role === 'CAP');
+        const kmAssigns = secAssigns.filter(a => a.role === 'KM');
+        
+        // Find Indicators/Sisters (everything else)
+        const indAssigns = secAssigns.filter(a => a.role !== 'CAP' && a.role !== 'KM');
+
+        // Let's group indicators by doors
+        const doors = sec.doors || [];
+        const doorGroups = {};
+        
+        // Initialize door groups so they show in order
+        doors.forEach(d => {
+          doorGroups[d] = [];
+        });
+        
+        const generalGroup = [];
+
+        indAssigns.forEach(a => {
+          if (a.door && doors.includes(a.door)) {
+            doorGroups[a.door].push(a);
+          } else if (a.door) {
+            if (!doorGroups[a.door]) doorGroups[a.door] = [];
+            doorGroups[a.door].push(a);
+          } else {
+            generalGroup.push(a);
+          }
+        });
+
+        const totalSecCount = secAssigns.length;
+
+        contentHtml += `
+          <div class="rd-sector-card" style="background: rgba(255,255,255,0.75); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1.5px solid rgba(255,255,255,0.45); border-radius: 18px; padding: 18px; margin-bottom: 18px; box-shadow: var(--shadow-card);">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+              <div>
+                <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin:0;">${esc(sec.name)}</h3>
+                <span style="font-size: 12px; color: var(--danger); font-weight: 800; margin-top: 2px; display: inline-block;">📍 ${esc(sec.subSector || 'Geral')}</span>
+              </div>
+              <span style="font-size: 11px; font-weight: 800; color: var(--primary); background: var(--primary-light); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(47,53,143,0.15);">${totalSecCount} Atribuídos</span>
+            </div>
+            
+            <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 12px;">
+              <!-- Leaders: CAP & KM -->
+              ${(capAssigns.length > 0 || kmAssigns.length > 0) ? `
+                <div style="padding: 10px; background: rgba(0,0,0,0.02); border-radius: 12px; border: 1px solid rgba(0,0,0,0.02);">
+                  <span class="card-section-title" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">Responsáveis do Setor</span>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    ${capAssigns.map(a => {
+                      const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                      return renderRdVolRow(v, 'Capitão', 'badge-cap');
+                    }).join('')}
+                    ${kmAssigns.map(a => {
+                      const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                      return renderRdVolRow(v, 'Homem-Chave', 'badge-km');
+                    }).join('')}
+                  </div>
+                </div>
+              ` : ''}
+
+              <!-- Doors -->
+              ${Object.keys(doorGroups).map(doorName => {
+                const doorAssigns = doorGroups[doorName];
+                return `
+                  <div style="padding: 10px; background: rgba(255, 255, 255, 0.4); border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.03);">
+                    <span class="card-section-title" style="font-size: 11px; color: var(--info); margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
+                      🚪 ${esc(doorName)} (${doorAssigns.length})
+                    </span>
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                      ${doorAssigns.length > 0 ? doorAssigns.map(a => {
+                        const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                        const isSister = v && !!v.isSister;
+                        const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
+                        const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                        const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+                        return renderRdVolRow(v, rLabel, rClass);
+                      }).join('') : `<p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 4px 0 0 4px;">Sem voluntários atribuídos</p>`}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+
+              <!-- Sem Porta / Geral -->
+              ${generalGroup.length > 0 ? `
+                <div style="padding: 10px; background: rgba(255, 255, 255, 0.4); border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.03);">
+                  <span class="card-section-title" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
+                    Sem Porta / Geral (${generalGroup.length})
+                  </span>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    ${generalGroup.map(a => {
+                      const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                      const isSister = v && !!v.isSister;
+                      const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
+                      const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                      const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+                      return renderRdVolRow(v, rLabel, rClass);
+                    }).join('')}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      });
+    }
+
+    rdViewContent.innerHTML = contentHtml;
+
+    // Attach event listeners to filters to update state and trigger re-render
+    const rdFilterShift = target.querySelector('#rdFilterShift');
+    const rdFilterSector = target.querySelector('#rdFilterSector');
+
+    rdFilterShift.addEventListener('change', (e) => {
+      activeRdShiftId = e.target.value;
+      renderRdView(target);
+    });
+
+    rdFilterSector.addEventListener('change', (e) => {
+      activeRdSectorId = e.target.value;
+      renderRdView(target);
     });
   };
 
