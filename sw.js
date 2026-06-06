@@ -1,4 +1,4 @@
-const CACHE_NAME = 'porto2026-mobile-cache-v2';
+const CACHE_NAME = 'porto2026-mobile-cache-v3';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -15,7 +15,8 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('[Service Worker] Pre-caching static assets');
-        return cache.addAll(ASSETS_TO_CACHE);
+        const reloadRequests = ASSETS_TO_CACHE.map(url => new Request(url, { cache: 'reload' }));
+        return cache.addAll(reloadRequests);
       })
       .then(() => self.skipWaiting())
   );
