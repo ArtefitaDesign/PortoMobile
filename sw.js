@@ -1,4 +1,4 @@
-const CACHE_NAME = 'porto2026-mobile-cache-v5';
+const CACHE_NAME = 'porto2026-mobile-cache-v8';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',

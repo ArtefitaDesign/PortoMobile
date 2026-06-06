@@ -721,9 +721,9 @@ body {
   vertical-align: middle;
 }
 
-.badge-cap { background: var(--primary-light); color: var(--primary); border: 1px solid rgba(47, 53, 143, 0.2); }
+.badge-cap { background: rgba(124, 58, 237, 0.08); color: #7c3aed; border: 1px solid rgba(124, 58, 237, 0.2); }
 .badge-km { background: var(--warning-light); color: var(--warning); border: 1px solid rgba(217, 119, 6, 0.2); }
-.badge-ind { background: rgba(0,0,0,0.03); color: var(--text-secondary); border: 1px solid rgba(0,0,0,0.06); }
+.badge-ind { background: rgba(5, 150, 105, 0.08); color: #059669; border: 1px solid rgba(5, 150, 105, 0.2); }
 .badge-torni { background: rgba(2, 132, 199, 0.08); color: var(--info); border: 1px solid rgba(2, 132, 199, 0.2); }
 .badge-irma { background: rgba(219, 39, 119, 0.08); color: #db2777; border: 1px solid rgba(219, 39, 119, 0.2); }
 

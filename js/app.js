@@ -1480,10 +1480,20 @@ const App = (() => {
         const roleText = a.role === 'CAP' ? 'Capitão' : (a.role === 'KM' ? 'Homem-Chave' : 'Indicador');
 
         // Render Captain info inside details popup
-        const captains = db.assignments
-          .filter(x => x.shiftId === sh.id && x.sectorId === sec.id && x.role === 'CAP')
+        const sameSecAssigns = db.assignments.filter(x => x.shiftId === sh.id && x.sectorId === sec.id);
+        const captains = sameSecAssigns
+          .filter(x => x.role === 'CAP')
           .map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId)))
           .filter(Boolean);
+
+        // Other team members (excl. KM and self), sorted: Torni → IND → Irmã
+        const teamMembers = sortByRole(
+          sameSecAssigns
+            .filter(x => x.role !== 'CAP' && x.role !== 'KM' && String(x.volunteerId) !== String(currentUser.id))
+            .map(x => ({ assign: x, vol: db.volunteers.find(v => String(v.id) === String(x.volunteerId)) }))
+            .filter(m => m.vol),
+          m => m.vol
+        );
 
         let capsHtml = '';
         if (captains.length > 0) {
@@ -1494,7 +1504,7 @@ const App = (() => {
                 ${captains.map(c => `
                   <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name">${esc(c.fullName)}</span>
+                      <span class="vol-name" style="font-weight:700; color:#7c3aed;">${esc(c.fullName)}</span>
                       <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
                     </div>
                     ${c.phone ? `
@@ -1509,13 +1519,82 @@ const App = (() => {
             </div>`;
         }
 
+        let teamHtml = '';
+        if (teamMembers.length > 0) {
+          teamHtml = `
+            <div>
+              <span class="card-section-title" style="color: var(--info); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Equipa do Setor (${teamMembers.length})</span>
+              <div class="vol-row-list">
+                ${teamMembers.map(m => {
+                  const i = m.vol;
+                  const isSister = !!i.isSister;
+                  const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
+                  const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                  const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+                  const nameColor = getVolNameColor(rClass);
+                  return `
+                    <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
+                      <div style="display:flex; flex-direction:column; gap:2px;">
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                          <span class="vol-name" style="font-size:13.5px; font-weight:700; color:${nameColor};">${esc(i.fullName)}</span>
+                          <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
+                        </div>
+                        <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
+                      </div>
+                      ${i.phone ? `
+                        <div class="vol-actions" style="margin-top: 2px;">
+                          <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                          <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                        </div>
+                      ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                    </div>`;
+                }).join('')}
+              </div>
+            </div>`;
+        }
+
         const buttonsHtml = `
           <button class="btn-add-cal btn-primary" data-title="${esc(roleText)} - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
             📅 Adicionar à minha Agenda
           </button>
         `;
 
-        openShiftDetailsPopup(item, roleText, capsHtml, null, null, buttonsHtml);
+        // Check if current user is torni (torniquete)
+        const isCurrentUserTorni = currentUser.responsibility && 
+          (currentUser.responsibility.toUpperCase().includes('TORNI') || currentUser.responsibility.includes('Torniquete'));
+
+        // Keymen — only shown to torni users
+        let kmsHtml = '';
+        if (isCurrentUserTorni) {
+          const keymen = sameSecAssigns
+            .filter(x => x.role === 'KM')
+            .map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId)))
+            .filter(Boolean);
+          if (keymen.length > 0) {
+            kmsHtml = `
+              <div style="margin-bottom: 8px;">
+                <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Homem-Chave</span>
+                <div class="vol-row-list">
+                  ${keymen.map(k => `
+                    <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
+                      <div style="display:flex; flex-direction:column; gap:2px;">
+                        <span class="vol-name" style="font-weight:700; color:var(--warning);">${esc(k.fullName)}</span>
+                        <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
+                      </div>
+                      ${k.phone ? `
+                        <div class="vol-actions">
+                          <a href="tel:${makeTelLink(k.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
+                          <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
+                        </div>
+                      ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
+                    </div>
+                  `).join('')}
+                </div>
+              </div>`;
+          }
+        }
+
+        openShiftDetailsPopup(item, roleText, capsHtml, kmsHtml, teamHtml, buttonsHtml);
       });
     });
   };
@@ -1605,9 +1684,11 @@ const App = (() => {
         const sh = item.shift;
         const sec = item.sector;
 
-        // Find indicators assigned
+        // Find indicators assigned, sorted: Torni → IND → Irmã
         const sameSecAssigns = db.assignments.filter(x => x.shiftId === sh.id && x.sectorId === sec.id);
-        const teamInds = sameSecAssigns.filter(x => !x.role || x.role === 'IND').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const teamInds = sortByRole(
+          sameSecAssigns.filter(x => !x.role || x.role === 'IND').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean)
+        );
         const teamKms = sameSecAssigns.filter(x => x.role === 'KM').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
         const teamCaps = sameSecAssigns.filter(x => x.role === 'CAP' && String(x.volunteerId) !== String(currentUser.id)).map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
 
@@ -1622,12 +1703,13 @@ const App = (() => {
                   const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
                   const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
                   const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+                  const nameColor = getVolNameColor(rClass);
 
                   return `
                     <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
                       <div style="display:flex; flex-direction:column; gap:2px;">
                         <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
-                          <span class="vol-name" style="font-size:13.5px;">${esc(i.fullName)}</span>
+                          <span class="vol-name" style="font-size:13.5px; font-weight:700; color:${nameColor};">${esc(i.fullName)}</span>
                           <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
                         </div>
                         <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
@@ -1655,7 +1737,7 @@ const App = (() => {
                 ${teamKms.map(k => `
                   <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name" style="font-size:13.5px;">${esc(k.fullName)}</span>
+                      <span class="vol-name" style="font-size:13.5px; font-weight:700; color:var(--warning);">${esc(k.fullName)}</span>
                       <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
                     </div>
                     ${k.phone ? `
@@ -1679,7 +1761,7 @@ const App = (() => {
                 ${teamCaps.map(c => `
                   <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name" style="font-size:13.5px;">${esc(c.fullName)}</span>
+                      <span class="vol-name" style="font-size:13.5px; font-weight:700; color:var(--primary);">${esc(c.fullName)}</span>
                       <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
                     </div>
                     ${c.phone ? `
@@ -1818,13 +1900,45 @@ const App = (() => {
     });
   };
 
+  // Map badge class to name text color
+  const getVolNameColor = (rClass) => {
+    switch(rClass) {
+      case 'badge-cap':   return '#7c3aed';          // roxo/violet
+      case 'badge-km':    return 'var(--warning)';    // âmbar
+      case 'badge-irma':  return '#db2777';           // rosa
+      case 'badge-torni': return 'var(--info)';       // azul
+      case 'badge-ind':   return '#059669';           // verde
+      default:            return 'var(--text-primary)';
+    }
+  };
+
+  // Sort order: Capitão (0) → Homem-Chave (1) → Torniquetes (2) → Indicadores (3) → Irmãs (4)
+  const getVolRoleOrder = (v) => {
+    if (!v) return 99;
+    const resp = (v.responsibility || '').toUpperCase();
+    if (resp === 'CAP') return 0;
+    if (resp === 'KM') return 1;
+    if (resp.includes('TORNI') || resp.includes('TORNIQUETE')) return 2;
+    if (!!v.isSister) return 4;
+    return 3; // Indicador
+  };
+
+  const sortByRole = (arr, getVol = v => v) =>
+    [...arr].sort((a, b) => {
+      const va = getVol(a), vb = getVol(b);
+      const diff = getVolRoleOrder(va) - getVolRoleOrder(vb);
+      if (diff !== 0) return diff;
+      return (va?.fullName || '').localeCompare(vb?.fullName || '');
+    });
+
   const renderRdVolRow = (v, roleLabel, rClass) => {
     if (!v) return '';
+    const nameColor = getVolNameColor(rClass);
     return `
       <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #ffffff; border-radius: 12px; border: 1px solid rgba(0,0,0,0.03); margin-bottom: 4px;">
         <div style="display:flex; flex-direction:column; gap:2px;">
           <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
-            <span class="vol-name" style="font-size:13px; font-weight: 700; color: var(--text-primary);">${esc(v.fullName)}</span>
+            <span class="vol-name" style="font-size:13px; font-weight: 700; color: ${nameColor};">${esc(v.fullName)}</span>
             <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${roleLabel}</span>
           </div>
           <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(v.congregation || 'Sem Congregação')}</span>
@@ -1911,7 +2025,7 @@ const App = (() => {
                 🚪 ${esc(doorName)} (${doorAssigns.length})
               </span>
               <div style="display: flex; flex-direction: column; gap: 6px;">
-                ${doorAssigns.length > 0 ? doorAssigns.map(a => {
+                ${doorAssigns.length > 0 ? sortByRole(doorAssigns, a => db.volunteers.find(vol => String(vol.id) === String(a.volunteerId))).map(a => {
                   const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
                   const isSister = v && !!v.isSister;
                   const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
@@ -1931,7 +2045,7 @@ const App = (() => {
               Sem Porta / Geral (${generalGroup.length})
             </span>
             <div style="display: flex; flex-direction: column; gap: 6px;">
-              ${generalGroup.map(a => {
+              ${sortByRole(generalGroup, a => db.volunteers.find(vol => String(vol.id) === String(a.volunteerId))).map(a => {
                 const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
                 const isSister = v && !!v.isSister;
                 const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
