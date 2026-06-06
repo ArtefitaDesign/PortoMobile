@@ -16,6 +16,8 @@ const App = (() => {
   let lastSyncCheckTime = 0;
   let activeRdShiftId = '';
   let activeRdSectorId = 'all';
+  let activeKmShiftId = '';
+  let activeKmSectorId = 'all';
 
   // Cache keys
   const CACHE_KEY_DB = 'porto2026_mobile_db';
@@ -739,7 +741,7 @@ const App = (() => {
     else if (r === 'KM') roleText = 'Homem-Chave';
     else if (r.includes('TORNI')) roleText = 'Torniquetes';
     else if (currentUser.isSister || r === 'IRM') roleText = 'Irmã';
-    userRoleBadge.textContent = roleText + " [Responsibility: " + (currentUser.responsibility || "N/A") + " | isUsher: " + currentUser.isUsher + " | isSister: " + currentUser.isSister + " | id: " + currentUser.id + "]";
+    userRoleBadge.textContent = roleText;
 
     detectScaleChanges(db);
     renderRoleDashboard();
@@ -1017,7 +1019,6 @@ const App = (() => {
           </div>
         `;
         dashboardContent.appendChild(nextCard);
-      }
 
         const targetTime = startDt.getTime();
         const referenceMs = 24 * 60 * 60 * 1000; // 24h progress bar window
@@ -1701,184 +1702,112 @@ const App = (() => {
   // 3. HOMEM-CHAVE VIEW
   const renderKeymanView = (assigns, container) => {
     const target = container || dashboardContent;
-    if (assigns.length === 0) {
-      target.innerHTML = renderEmptyState('Nenhum turno associado', 'De momento não estás atribuído em nenhum turno ou setor como Homem-Chave para o dia selecionado.');
+    
+    // Get all assignments for this Keyman (without date filters, to populate dropdowns correctly)
+    const kmAssigns = db.assignments.filter(a => String(a.volunteerId) === String(currentUser.id));
+    
+    if (kmAssigns.length === 0) {
+      target.innerHTML = renderEmptyState('Nenhum turno associado', 'De momento não estás atribuído em nenhum turno ou setor como Homem-Chave.');
       return;
     }
 
-    const sessionStart = parseInt(sessionStorage.getItem('porto2026_session_start_time') || '0');
-
-    // Sort assignments by shift date/time
-    const sorted = [...assigns].map(a => {
+    // Find unique shifts this KM is assigned to
+    const kmShifts = [];
+    kmAssigns.forEach(a => {
       const sh = db.shifts.find(s => s.id === a.shiftId);
-      const sec = db.sectors.find(s => s.id === a.sectorId);
-      return { assign: a, shift: sh, sector: sec };
-    }).filter(x => x.shift && x.sector)
-      .sort((a,b) => a.shift.date.localeCompare(b.shift.date) || a.shift.startTime.localeCompare(b.shift.startTime));
-
-    // Group sorted items by shift date
-    const groups = {};
-    sorted.forEach(item => {
-      const date = item.shift.date;
-      if (!groups[date]) groups[date] = [];
-      groups[date].push(item);
+      if (sh && !kmShifts.some(s => s.id === sh.id)) {
+        kmShifts.push(sh);
+      }
     });
-    const sortedDates = Object.keys(groups).sort();
+    // Sort shifts chronologically
+    kmShifts.sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
 
-    let html = `
-      <p style="font-size:12.5px;color:var(--text-muted);margin: 4px 0 14px 4px;">Desliza para os lados e clica no cartão para gerir a equipa</p>
+    // Default KM shift if none selected or if selected is not in available list
+    if (kmShifts.length > 0) {
+      if (!activeKmShiftId || !kmShifts.some(s => s.id === activeKmShiftId)) {
+        activeKmShiftId = kmShifts[0].id;
+      }
+    } else {
+      activeKmShiftId = null;
+    }
+
+    // Build filters HTML (Turno filter only)
+    let filterHtml = `
+      <div class="rd-filters-container" style="margin-top: 10px; display: flex; flex-direction: column;">
+        <div class="rd-filter-group" style="width: 100%;">
+          <span class="rd-filter-label">Selecione o Turno</span>
+          <div class="rd-select-wrapper">
+            <select id="kmFilterShift" class="rd-select-custom" ${kmShifts.length === 0 ? 'disabled style="opacity: 0.5;"' : ''}>
+              ${kmShifts.length > 0 
+                ? kmShifts.map(s => {
+                    const selectedAttr = s.id === activeKmShiftId ? 'selected' : '';
+                    return `<option value="${s.id}" ${selectedAttr}>${getWeekDay(s.date)}, ${formatDate(s.date)} — ${s.startTime} às ${s.endTime}</option>`;
+                  }).join('')
+                : '<option value="">Nenhum turno</option>'
+              }
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="kmViewContent" style="margin-top: 12px;"></div>
     `;
 
-    sortedDates.forEach(date => {
-      const dateItems = groups[date];
-      html += `
-        <h4 class="card-section-title" style="margin-left: 4px; margin-top: 16px; font-size: 13px; color: var(--primary); font-weight: 800;">
-          ${getWeekDay(date)}, ${formatDate(date)} (${dateItems.length})
-        </h4>
-        <div class="carousel-wrapper" style="display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px; margin: 0 -16px 16px -16px; -webkit-overflow-scrolling: touch; scrollbar-width: none;">
-      `;
+    target.innerHTML = filterHtml;
 
-      dateItems.forEach(item => {
-        const sh = item.shift;
-        const sec = item.sector;
-        const a = item.assign;
-        const changeBadgeHtml = getChangeBadgeHtml(a, sessionStart);
-        const cardCustomClass = getCardClass(a);
-        const globalIdx = sorted.indexOf(item);
+    const kmViewContent = target.querySelector('#kmViewContent');
+    if (!activeKmShiftId) {
+      kmViewContent.innerHTML = renderEmptyState('Nenhum turno', 'Não existem turnos selecionados.');
+      return;
+    }
 
-        html += `
-          <div class="scale-card carousel-card ${cardCustomClass}" data-idx="${globalIdx}" style="flex-shrink: 0; width: 280px; cursor: pointer; margin-bottom: 0; position: relative;">
-            <div class="scale-card-header" style="margin-bottom: 8px;">
-              <div>
-                <h3 style="font-size: 15.5px; line-height: 1.2; font-weight:800; letter-spacing:-0.01em;">${esc(sec.name)} ${changeBadgeHtml}</h3>
-                <span class="scale-subsector" style="font-size: 12.5px;">${esc(sec.subSector || 'Geral')}${a.door ? ` • 🚪 ${esc(a.door)}` : ''}</span>
-              </div>
-            </div>
-            <div class="scale-date-row" style="font-size: 13px; margin-bottom: 8px; color: var(--text-primary); font-weight:700; display: none;">
-              📅 <span>${getWeekDay(sh.date)}, ${formatDate(sh.date)}</span>
-            </div>
-            <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; font-weight: 500;">
-              🕒 Horário: <strong>${sh.startTime}–${sh.endTime}</strong>
-            </div>
-            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
-              Função: <span class="user-role-badge" style="padding: 2px 6px; font-size:11.5px; font-weight: 800; background:var(--warning-light); color:var(--warning); border-color: rgba(217, 119, 6, 0.15);">Homem-Chave</span>
-            </div>
-            <div style="margin-top: 16px; border-top:1px solid rgba(0,0,0,0.03); padding-top:12px; font-weight: 800; color: var(--primary); font-size: 12.5px; display: flex; align-items: center; gap: 4px;">
-              👥 Gerir Equipa & Contactos ›
-            </div>
-            ${getCompletedBadgeHtml(a)}
-          </div>`;
-      });
-
-      html += `</div>`;
-    });
-    target.innerHTML = html;
-    initDragToScroll();
-
-    // Bind Carousel Cards
-    target.querySelectorAll('.carousel-card').forEach(card => {
-      card.addEventListener('click', () => {
-        const idx = parseInt(card.dataset.idx);
-        const item = sorted[idx];
-        const sh = item.shift;
-        const sec = item.sector;
-
+    // Find all sectors this KM is assigned to in the selected shift
+    const activeShiftKmAssigns = kmAssigns.filter(a => a.shiftId === activeKmShiftId);
+    
+    let contentHtml = '';
+    if (activeShiftKmAssigns.length === 0) {
+      contentHtml = renderEmptyState('Nenhum setor', 'Não estás atribuído a nenhum setor neste turno.');
+    } else {
+      activeShiftKmAssigns.forEach(a => {
+        const sec = db.sectors.find(s => s.id === a.sectorId);
+        if (!sec) return;
+        
         // Find indicators, captains and other keymen assigned to same sector/shift
-        const sameSecAssigns = db.assignments.filter(x => x.shiftId === sh.id && x.sectorId === sec.id);
-        const teamInds = sameSecAssigns.filter(x => !x.role || x.role === 'IND').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
-        const teamKms = sameSecAssigns.filter(x => x.role === 'KM' && String(x.volunteerId) !== String(currentUser.id)).map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
-        const teamCaps = sameSecAssigns.filter(x => x.role === 'CAP').map(x => db.volunteers.find(v => String(v.id) === String(x.volunteerId))).filter(Boolean);
+        const sameSecAssigns = db.assignments.filter(x => x.shiftId === activeKmShiftId && x.sectorId === sec.id);
+        const totalSecCount = sameSecAssigns.length;
 
-        let teamHtml = '';
-        if (teamInds.length > 0) {
-          teamHtml = `
-            <div>
-              <span class="card-section-title" style="color: var(--info); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Equipa de Indicadores (${teamInds.length})</span>
-              <div class="vol-row-list">
-                ${teamInds.map(i => {
-                  const isSister = !!i.isSister;
-                  const isTorni = i.responsibility && (i.responsibility.includes('TORNI') || i.responsibility.includes('Torniquete'));
-                  const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
-                  const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
-
-                  return `
-                    <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
-                      <div style="display:flex; flex-direction:column; gap:2px;">
-                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
-                          <span class="vol-name" style="font-size:13.5px;">${esc(i.fullName)}</span>
-                          <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
-                        </div>
-                        <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
-                      </div>
-                      ${i.phone ? `
-                        <div class="vol-actions" style="margin-top: 2px;">
-                          <a href="tel:${makeTelLink(i.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
-                          <a href="https://wa.me/${waPhone(i.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
-                        </div>
-                      ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
-                    </div>`;
-                }).join('')}
-              </div>
-            </div>`;
-        } else {
-          teamHtml = `<p style="font-size:11px;color:var(--text-muted);margin-top:4px;">Nenhum indicador atribuído a este setor ainda.</p>`;
-        }
-
-        let kmsHtml = '';
-        if (teamKms.length > 0) {
-          kmsHtml = `
-            <div style="margin-bottom: 8px;">
-              <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Co-Homem-Chave (${teamKms.length})</span>
-              <div class="vol-row-list">
-                ${teamKms.map(k => `
-                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
-                    <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name" style="font-size:13.5px;">${esc(k.fullName)}</span>
-                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
-                    </div>
-                    ${k.phone ? `
-                      <div class="vol-actions" style="margin-top: 2px;">
-                        <a href="tel:${makeTelLink(k.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
-                        <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
-                      </div>
-                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
-                  </div>
-                `).join('')}
-              </div>
-            </div>`;
-        }
-
-        let capsHtml = '';
-        if (teamCaps.length > 0) {
-          capsHtml = `
-            <div style="margin-bottom: 8px;">
-              <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Capitão do Setor (${teamCaps.length})</span>
-              <div class="vol-row-list">
-                ${teamCaps.map(c => `
-                  <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
-                    <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name" style="font-size:13.5px;">${esc(c.fullName)}</span>
-                      <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
-                    </div>
-                    ${c.phone ? `
-                      <div class="vol-actions" style="margin-top: 2px;">
-                        <a href="tel:${makeTelLink(c.phone)}" class="btn-action-pill phone" title="Ligar">📞 Ligar</a>
-                        <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
-                      </div>
-                    ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
-                  </div>
-                `).join('')}
-              </div>
-            </div>`;
-        }
-
-        const buttonsHtml = `
-          <button class="btn-add-cal btn-primary" data-title="Homem-Chave - ${esc(sec.name)}, ${esc(sec.subSector || 'Geral')}" data-date="${sh.date}" data-start="${sh.startTime}" data-end="${sh.endTime}" data-sec="${esc(sec.name)}" data-sub="${esc(sec.subSector || 'Geral')}" style="width: auto; min-width: 220px; padding: 10px 20px; font-size: 13px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 12px rgba(47, 53, 143, 0.15);">
-            📅 Adicionar à minha Agenda
-          </button>
+        contentHtml += `
+          <div class="rd-sector-card" data-sector-id="${sec.id}" style="background: rgba(255,255,255,0.75); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1.5px solid rgba(255,255,255,0.45); border-radius: 18px; padding: 18px; margin-bottom: 12px; box-shadow: var(--shadow-card); cursor: pointer; transition: var(--transition); display: flex; justify-content: space-between; align-items: center;">
+            <div style="text-align: left;">
+              <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin:0;">${esc(sec.name)}</h3>
+              <span style="font-size: 12px; color: var(--danger); font-weight: 800; margin-top: 2px; display: inline-block;">📍 ${esc(sec.subSector || 'Geral')}${a.door ? ` • 🚪 ${esc(a.door)}` : ''}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 11px; font-weight: 800; color: var(--primary); background: var(--primary-light); padding: 5px 12px; border-radius: 20px; border: 1px solid rgba(47,53,143,0.15);">${totalSecCount} Atribuídos</span>
+              <span style="color: var(--text-muted); font-size: 16px; font-weight: bold; padding-left: 4px;">➔</span>
+            </div>
+          </div>
         `;
+      });
+    }
 
-        openShiftDetailsPopup(item, 'Homem-Chave', capsHtml, kmsHtml, teamHtml, buttonsHtml);
+    kmViewContent.innerHTML = contentHtml;
+
+    // Attach event listener to KM filter
+    const kmFilterShift = target.querySelector('#kmFilterShift');
+    kmFilterShift.addEventListener('change', (e) => {
+      activeKmShiftId = e.target.value;
+      renderKeymanView(assigns, target);
+    });
+
+    // Attach event listeners to sector cards to open the bottom sheet modal
+    target.querySelectorAll('.rd-sector-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const sectorId = card.dataset.sectorId;
+        const sec = db.sectors.find(s => s.id === sectorId);
+        if (sec) {
+          const sameSecAssigns = db.assignments.filter(x => x.shiftId === activeKmShiftId && x.sectorId === sec.id);
+          openRdSectorDetailsPopup(sec, sameSecAssigns);
+        }
       });
     });
   };
@@ -1904,6 +1833,120 @@ const App = (() => {
     `;
   };
 
+  const openRdSectorDetailsPopup = (sec, secAssigns) => {
+    popupSectorName.textContent = sec.name;
+
+    // Find Captains and Keymen
+    const capAssigns = secAssigns.filter(a => a.role === 'CAP');
+    const kmAssigns = secAssigns.filter(a => a.role === 'KM');
+    
+    // Find Indicators/Sisters (everything else)
+    const indAssigns = secAssigns.filter(a => a.role !== 'CAP' && a.role !== 'KM');
+
+    // Group indicators by doors
+    const doors = sec.doors || [];
+    const doorGroups = {};
+    
+    // Initialize door groups so they show in order
+    doors.forEach(d => {
+      doorGroups[d] = [];
+    });
+    
+    const generalGroup = [];
+
+    indAssigns.forEach(a => {
+      if (a.door && doors.includes(a.door)) {
+        doorGroups[a.door].push(a);
+      } else if (a.door) {
+        if (!doorGroups[a.door]) doorGroups[a.door] = [];
+        doorGroups[a.door].push(a);
+      } else {
+        generalGroup.push(a);
+      }
+    });
+
+    const selectedShift = db.shifts.find(s => s.id === activeRdShiftId);
+    
+    let html = `
+      <div style="margin-bottom: 12px; font-size: 13px; text-align: left;">
+        <span class="scale-subsector" style="font-size: 12px; font-weight: 800; color: var(--danger); display: block; margin-bottom: 2px;">📍 ${esc(sec.subSector || 'Geral')}</span>
+        ${selectedShift ? `
+        <div style="display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; color: var(--text-primary); font-weight: 700; margin-bottom: 6px;">
+          <span>📅 ${getWeekDay(selectedShift.date)}, ${formatDate(selectedShift.date)}</span>
+          <span>🕒 ${selectedShift.startTime} – ${selectedShift.endTime}</span>
+        </div>
+        ` : ''}
+      </div>
+      
+      <div style="margin-bottom: 12px; max-height: 52vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; text-align: left; padding-right: 4px;">
+        <!-- Leaders: CAP & KM -->
+        ${(capAssigns.length > 0 || kmAssigns.length > 0) ? `
+          <div style="padding: 10px; background: rgba(0,0,0,0.02); border-radius: 12px; border: 1px solid rgba(0,0,0,0.02);">
+            <span class="card-section-title" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; display: block; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">Responsáveis do Setor</span>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${capAssigns.map(a => {
+                const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                return renderRdVolRow(v, 'Capitão', 'badge-cap');
+              }).join('')}
+              ${kmAssigns.map(a => {
+                const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                return renderRdVolRow(v, 'Homem-Chave', 'badge-km');
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- Doors -->
+        ${Object.keys(doorGroups).map(doorName => {
+          const doorAssigns = doorGroups[doorName];
+          return `
+            <div style="padding: 10px; background: rgba(0,0,0,0.01); border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.02);">
+              <span class="card-section-title" style="font-size: 11px; color: var(--info); margin-bottom: 8px; display: flex; align-items: center; gap: 4px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">
+                🚪 ${esc(doorName)} (${doorAssigns.length})
+              </span>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                ${doorAssigns.length > 0 ? doorAssigns.map(a => {
+                  const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                  const isSister = v && !!v.isSister;
+                  const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
+                  const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                  const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+                  return renderRdVolRow(v, rLabel, rClass);
+                }).join('') : `<p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 4px 0 0 4px;">Sem voluntários atribuídos</p>`}
+              </div>
+            </div>
+          `;
+        }).join('')}
+
+        <!-- Sem Porta / Geral -->
+        ${generalGroup.length > 0 ? `
+          <div style="padding: 10px; background: rgba(0,0,0,0.01); border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.02);">
+            <span class="card-section-title" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px; display: block; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;">
+              Sem Porta / Geral (${generalGroup.length})
+            </span>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              ${generalGroup.map(a => {
+                const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
+                const isSister = v && !!v.isSister;
+                const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
+                const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
+                const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
+                return renderRdVolRow(v, rLabel, rClass);
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+
+      <div style="margin-top: 8px; border-top: 1.5px solid var(--surface-border); padding-top: 12px; display: flex; justify-content: center;">
+        <button class="btn btn-primary" onclick="document.getElementById('shiftDetailsPopup').classList.remove('open')" style="width: 100%; border-radius: 12px; padding: 12px; font-weight: 700; font-size: 14px;">Fechar</button>
+      </div>
+    `;
+
+    popupBodyContent.innerHTML = html;
+    shiftDetailsPopup.classList.add('open');
+  };
+
   const renderRdView = (container) => {
     const target = container || dashboardContent;
     
@@ -1919,38 +1962,59 @@ const App = (() => {
       return;
     }
 
-    // Default shift if none selected
-    if (!activeRdShiftId || !db.shifts.some(s => s.id === activeRdShiftId)) {
-      activeRdShiftId = sortedShifts[0].id;
-    }
-
     // Sort sectors alphabetically
     const sortedSectors = [...db.sectors].sort((a, b) => a.name.localeCompare(b.name));
 
-    // Get current shift object
-    const selectedShift = db.shifts.find(s => s.id === activeRdShiftId);
+    // Filter shifts based on selected sector (if a specific sector is selected)
+    let availableShifts = sortedShifts;
+    if (activeRdSectorId && activeRdSectorId !== 'all') {
+      availableShifts = sortedShifts.filter(s => 
+        db.assignments.some(a => a.shiftId === s.id && a.sectorId === activeRdSectorId)
+      );
+    }
 
-    // Build filters HTML
+    // Default shift if none selected or if selected is not in available shifts
+    if (availableShifts.length > 0) {
+      if (!activeRdShiftId || !availableShifts.some(s => s.id === activeRdShiftId)) {
+        activeRdShiftId = availableShifts[0].id;
+      }
+    } else {
+      activeRdShiftId = null;
+    }
+
+    // Get current shift object
+    const selectedShift = activeRdShiftId ? db.shifts.find(s => s.id === activeRdShiftId) : null;
+
+    // Build filters HTML with organic custom styles
     let filterHtml = `
-      <div class="rd-filters-container" style="display: flex; gap: 10px; margin-bottom: 18px; padding: 0 4px;">
-        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
-          <label style="font-size: 11px; font-weight: 800; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Turno</label>
-          <select id="rdFilterShift" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.08); font-size: 13px; font-weight: 700; background: white; color: var(--text-primary); cursor: pointer; box-shadow: var(--shadow-sm); outline: none;">
-            ${sortedShifts.map(s => {
-              const selectedAttr = s.id === activeRdShiftId ? 'selected' : '';
-              return `<option value="${s.id}" ${selectedAttr}>${getWeekDay(s.date)}, ${formatDate(s.date)} — ${s.startTime} às ${s.endTime}</option>`;
-            }).join('')}
-          </select>
+      <div class="rd-filters-container">
+        <!-- Setor Filter first to drive the Shift options -->
+        <div class="rd-filter-group">
+          <span class="rd-filter-label">Setor</span>
+          <div class="rd-select-wrapper">
+            <select id="rdFilterSector" class="rd-select-custom">
+              <option value="all" ${activeRdSectorId === 'all' ? 'selected' : ''}>Todos</option>
+              ${sortedSectors.map(sec => {
+                const selectedAttr = sec.id === activeRdSectorId ? 'selected' : '';
+                return `<option value="${sec.id}" ${selectedAttr}>${esc(sec.name)} (${esc(sec.subSector || 'Geral')})</option>`;
+              }).join('')}
+            </select>
+          </div>
         </div>
-        <div style="flex: 1; display: flex; flex-direction: column; gap: 4px;">
-          <label style="font-size: 11px; font-weight: 800; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em;">Setor</label>
-          <select id="rdFilterSector" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.08); font-size: 13px; font-weight: 700; background: white; color: var(--text-primary); cursor: pointer; box-shadow: var(--shadow-sm); outline: none;">
-            <option value="all" ${activeRdSectorId === 'all' ? 'selected' : ''}>Todos os Setores</option>
-            ${sortedSectors.map(sec => {
-              const selectedAttr = sec.id === activeRdSectorId ? 'selected' : '';
-              return `<option value="${sec.id}" ${selectedAttr}>${esc(sec.name)} (${esc(sec.subSector || 'Geral')})</option>`;
-            }).join('')}
-          </select>
+
+        <div class="rd-filter-group">
+          <span class="rd-filter-label">Turno</span>
+          <div class="rd-select-wrapper">
+            <select id="rdFilterShift" class="rd-select-custom" ${availableShifts.length === 0 ? 'disabled style="opacity: 0.5;"' : ''}>
+              ${availableShifts.length > 0 
+                ? availableShifts.map(s => {
+                    const selectedAttr = s.id === activeRdShiftId ? 'selected' : '';
+                    return `<option value="${s.id}" ${selectedAttr}>${getWeekDay(s.date)}, ${formatDate(s.date)} — ${s.startTime} às ${s.endTime}</option>`;
+                  }).join('')
+                : '<option value="">Nenhum turno</option>'
+              }
+            </select>
+          </div>
         </div>
       </div>
       <div id="rdViewContent"></div>
@@ -1959,7 +2023,7 @@ const App = (() => {
     target.innerHTML = filterHtml;
 
     // Filter assignments for the selected shift and (optionally) sector
-    const activeShiftAssigns = db.assignments.filter(a => a.shiftId === activeRdShiftId);
+    const activeShiftAssigns = activeRdShiftId ? db.assignments.filter(a => a.shiftId === activeRdShiftId) : [];
     
     let sectorsToShow = [];
     if (activeRdSectorId !== 'all') {
@@ -1977,106 +2041,17 @@ const App = (() => {
     } else {
       sectorsToShow.forEach(sec => {
         const secAssigns = activeShiftAssigns.filter(a => a.sectorId === sec.id);
-        
-        // Find Captains and Keymen
-        const capAssigns = secAssigns.filter(a => a.role === 'CAP');
-        const kmAssigns = secAssigns.filter(a => a.role === 'KM');
-        
-        // Find Indicators/Sisters (everything else)
-        const indAssigns = secAssigns.filter(a => a.role !== 'CAP' && a.role !== 'KM');
-
-        // Let's group indicators by doors
-        const doors = sec.doors || [];
-        const doorGroups = {};
-        
-        // Initialize door groups so they show in order
-        doors.forEach(d => {
-          doorGroups[d] = [];
-        });
-        
-        const generalGroup = [];
-
-        indAssigns.forEach(a => {
-          if (a.door && doors.includes(a.door)) {
-            doorGroups[a.door].push(a);
-          } else if (a.door) {
-            if (!doorGroups[a.door]) doorGroups[a.door] = [];
-            doorGroups[a.door].push(a);
-          } else {
-            generalGroup.push(a);
-          }
-        });
-
         const totalSecCount = secAssigns.length;
 
         contentHtml += `
-          <div class="rd-sector-card" style="background: rgba(255,255,255,0.75); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1.5px solid rgba(255,255,255,0.45); border-radius: 18px; padding: 18px; margin-bottom: 18px; box-shadow: var(--shadow-card);">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-              <div>
-                <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin:0;">${esc(sec.name)}</h3>
-                <span style="font-size: 12px; color: var(--danger); font-weight: 800; margin-top: 2px; display: inline-block;">📍 ${esc(sec.subSector || 'Geral')}</span>
-              </div>
-              <span style="font-size: 11px; font-weight: 800; color: var(--primary); background: var(--primary-light); padding: 4px 10px; border-radius: 20px; border: 1px solid rgba(47,53,143,0.15);">${totalSecCount} Atribuídos</span>
+          <div class="rd-sector-card" data-sector-id="${sec.id}" style="background: rgba(255,255,255,0.75); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1.5px solid rgba(255,255,255,0.45); border-radius: 18px; padding: 18px; margin-bottom: 12px; box-shadow: var(--shadow-card); cursor: pointer; transition: var(--transition); display: flex; justify-content: space-between; align-items: center;">
+            <div style="text-align: left;">
+              <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin:0;">${esc(sec.name)}</h3>
+              <span style="font-size: 12px; color: var(--danger); font-weight: 800; margin-top: 2px; display: inline-block;">📍 ${esc(sec.subSector || 'Geral')}</span>
             </div>
-            
-            <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 12px;">
-              <!-- Leaders: CAP & KM -->
-              ${(capAssigns.length > 0 || kmAssigns.length > 0) ? `
-                <div style="padding: 10px; background: rgba(0,0,0,0.02); border-radius: 12px; border: 1px solid rgba(0,0,0,0.02);">
-                  <span class="card-section-title" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">Responsáveis do Setor</span>
-                  <div style="display: flex; flex-direction: column; gap: 6px;">
-                    ${capAssigns.map(a => {
-                      const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
-                      return renderRdVolRow(v, 'Capitão', 'badge-cap');
-                    }).join('')}
-                    ${kmAssigns.map(a => {
-                      const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
-                      return renderRdVolRow(v, 'Homem-Chave', 'badge-km');
-                    }).join('')}
-                  </div>
-                </div>
-              ` : ''}
-
-              <!-- Doors -->
-              ${Object.keys(doorGroups).map(doorName => {
-                const doorAssigns = doorGroups[doorName];
-                return `
-                  <div style="padding: 10px; background: rgba(255, 255, 255, 0.4); border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.03);">
-                    <span class="card-section-title" style="font-size: 11px; color: var(--info); margin-bottom: 8px; display: flex; align-items: center; gap: 4px;">
-                      🚪 ${esc(doorName)} (${doorAssigns.length})
-                    </span>
-                    <div style="display: flex; flex-direction: column; gap: 6px;">
-                      ${doorAssigns.length > 0 ? doorAssigns.map(a => {
-                        const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
-                        const isSister = v && !!v.isSister;
-                        const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
-                        const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
-                        const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
-                        return renderRdVolRow(v, rLabel, rClass);
-                      }).join('') : `<p style="font-size: 12px; color: var(--text-muted); font-style: italic; margin: 4px 0 0 4px;">Sem voluntários atribuídos</p>`}
-                    </div>
-                  </div>
-                `;
-              }).join('')}
-
-              <!-- Sem Porta / Geral -->
-              ${generalGroup.length > 0 ? `
-                <div style="padding: 10px; background: rgba(255, 255, 255, 0.4); border-radius: 12px; border: 1.5px solid rgba(0,0,0,0.03);">
-                  <span class="card-section-title" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
-                    Sem Porta / Geral (${generalGroup.length})
-                  </span>
-                  <div style="display: flex; flex-direction: column; gap: 6px;">
-                    ${generalGroup.map(a => {
-                      const v = db.volunteers.find(vol => String(vol.id) === String(a.volunteerId));
-                      const isSister = v && !!v.isSister;
-                      const isTorni = v && v.responsibility && (v.responsibility.includes('TORNI') || v.responsibility.includes('Torniquete'));
-                      const rLabel = isTorni ? 'Torniquetes' : (isSister ? 'Irmã' : 'Indicador');
-                      const rClass = isTorni ? 'badge-torni' : (isSister ? 'badge-irma' : 'badge-ind');
-                      return renderRdVolRow(v, rLabel, rClass);
-                    }).join('')}
-                  </div>
-                </div>
-              ` : ''}
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 11px; font-weight: 800; color: var(--primary); background: var(--primary-light); padding: 5px 12px; border-radius: 20px; border: 1px solid rgba(47,53,143,0.15);">${totalSecCount} Atribuídos</span>
+              <span style="color: var(--text-muted); font-size: 16px; font-weight: bold; padding-left: 4px;">➔</span>
             </div>
           </div>
         `;
@@ -2097,6 +2072,18 @@ const App = (() => {
     rdFilterSector.addEventListener('change', (e) => {
       activeRdSectorId = e.target.value;
       renderRdView(target);
+    });
+
+    // Attach event listeners to sector cards to open the bottom sheet modal
+    target.querySelectorAll('.rd-sector-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const sectorId = card.dataset.sectorId;
+        const sec = db.sectors.find(s => s.id === sectorId);
+        if (sec) {
+          const secAssigns = activeShiftAssigns.filter(a => a.sectorId === sec.id);
+          openRdSectorDetailsPopup(sec, secAssigns);
+        }
+      });
     });
   };
 
