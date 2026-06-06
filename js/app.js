@@ -15,7 +15,8 @@ const App = (() => {
   let backgroundSyncInterval = null;
   let lastSyncCheckTime = 0;
   let activeRdShiftId = '';
-  let activeRdSectorId = 'all';
+  let activeRdSectorIds = [];
+  let activeRdGroupSectors = [];
   let activeKmShiftId = '';
   let activeKmSectorId = 'all';
 
@@ -1501,10 +1502,15 @@ const App = (() => {
             <div style="margin-bottom: 8px;">
               <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Capitão do Turno</span>
               <div class="vol-row-list">
-                ${captains.map(c => `
+                ${captains.map(c => {
+                  const showDesig = !!c.designationName;
+                  return `
                   <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name" style="font-weight:700; color:#7c3aed;">${esc(c.fullName)}</span>
+                      <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                        <span class="vol-name" style="font-weight:700; color:#7c3aed;">${esc(c.fullName)}</span>
+                        ${showDesig ? `<span class="resp-badge-small" style="margin:0; font-size:9px; padding:2px 6px; background:#e2e8f0; color:#475569; border: 1px solid #cbd5e1; font-weight:600; border-radius:4px;">${esc(c.designationName)}</span>` : ''}
+                      </div>
                       <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
                     </div>
                     ${c.phone ? `
@@ -1513,8 +1519,8 @@ const App = (() => {
                         <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
                       </div>
                     ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
-                  </div>
-                `).join('')}
+                  </div>`;
+                }).join('')}
               </div>
             </div>`;
         }
@@ -1538,6 +1544,7 @@ const App = (() => {
                         <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                           <span class="vol-name" style="font-size:13.5px; font-weight:700; color:${nameColor};">${esc(i.fullName)}</span>
                           <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
+                          ${i.designationName ? `<span class="resp-badge-small" style="margin:0; font-size:9px; padding:2px 6px; background:#e2e8f0; color:#475569; border: 1px solid #cbd5e1; font-weight:600; border-radius:4px;">${esc(i.designationName)}</span>` : ''}
                         </div>
                         <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
                       </div>
@@ -1575,10 +1582,15 @@ const App = (() => {
               <div style="margin-bottom: 8px;">
                 <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Homem-Chave</span>
                 <div class="vol-row-list">
-                  ${keymen.map(k => `
+                  ${keymen.map(k => {
+                    const showDesig = !!k.designationName;
+                    return `
                     <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch;">
                       <div style="display:flex; flex-direction:column; gap:2px;">
-                        <span class="vol-name" style="font-weight:700; color:var(--warning);">${esc(k.fullName)}</span>
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                          <span class="vol-name" style="font-weight:700; color:var(--warning);">${esc(k.fullName)}</span>
+                          ${showDesig ? `<span class="resp-badge-small" style="margin:0; font-size:9px; padding:2px 6px; background:#e2e8f0; color:#475569; border: 1px solid #cbd5e1; font-weight:600; border-radius:4px;">${esc(k.designationName)}</span>` : ''}
+                        </div>
                         <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
                       </div>
                       ${k.phone ? `
@@ -1587,8 +1599,8 @@ const App = (() => {
                           <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
                         </div>
                       ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
-                    </div>
-                  `).join('')}
+                    </div>`;
+                  }).join('')}
                 </div>
               </div>`;
           }
@@ -1711,6 +1723,7 @@ const App = (() => {
                         <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                           <span class="vol-name" style="font-size:13.5px; font-weight:700; color:${nameColor};">${esc(i.fullName)}</span>
                           <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${rLabel}</span>
+                          ${i.designationName ? `<span class="resp-badge-small" style="margin:0; font-size:9px; padding:2px 6px; background:#e2e8f0; color:#475569; border: 1px solid #cbd5e1; font-weight:600; border-radius:4px;">${esc(i.designationName)}</span>` : ''}
                         </div>
                         <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(i.congregation || 'Sem Congregação')}</span>
                       </div>
@@ -1734,10 +1747,15 @@ const App = (() => {
             <div style="margin-bottom: 8px;">
               <span class="card-section-title" style="color: var(--warning); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Homem-Chave</span>
               <div class="vol-row-list">
-                ${teamKms.map(k => `
+                ${teamKms.map(k => {
+                  const showDesig = !!k.designationName;
+                  return `
                   <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name" style="font-size:13.5px; font-weight:700; color:var(--warning);">${esc(k.fullName)}</span>
+                      <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                        <span class="vol-name" style="font-size:13.5px; font-weight:700; color:var(--warning);">${esc(k.fullName)}</span>
+                        ${showDesig ? `<span class="resp-badge-small" style="margin:0; font-size:9px; padding:2px 6px; background:#e2e8f0; color:#475569; border: 1px solid #cbd5e1; font-weight:600; border-radius:4px;">${esc(k.designationName)}</span>` : ''}
+                      </div>
                       <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(k.congregation || 'Sem Congregação')}</span>
                     </div>
                     ${k.phone ? `
@@ -1746,8 +1764,8 @@ const App = (() => {
                         <a href="https://wa.me/${waPhone(k.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
                       </div>
                     ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
-                  </div>
-                `).join('')}
+                  </div>`;
+                }).join('')}
               </div>
             </div>`;
         }
@@ -1758,10 +1776,15 @@ const App = (() => {
             <div style="margin-bottom: 8px;">
               <span class="card-section-title" style="color: var(--primary); font-weight: 800; font-size: 11px; margin-bottom: 4px;">Co-Capitão do Setor (${teamCaps.length})</span>
               <div class="vol-row-list">
-                ${teamCaps.map(c => `
+                ${teamCaps.map(c => {
+                  const showDesig = !!c.designationName;
+                  return `
                   <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #f8fafc; border-radius: 12px;">
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                      <span class="vol-name" style="font-size:13.5px; font-weight:700; color:var(--primary);">${esc(c.fullName)}</span>
+                      <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                        <span class="vol-name" style="font-size:13.5px; font-weight:700; color:var(--primary);">${esc(c.fullName)}</span>
+                        ${showDesig ? `<span class="resp-badge-small" style="margin:0; font-size:9px; padding:2px 6px; background:#e2e8f0; color:#475569; border: 1px solid #cbd5e1; font-weight:600; border-radius:4px;">${esc(c.designationName)}</span>` : ''}
+                      </div>
                       <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(c.congregation || 'Sem Congregação')}</span>
                     </div>
                     ${c.phone ? `
@@ -1770,8 +1793,8 @@ const App = (() => {
                         <a href="https://wa.me/${waPhone(c.phone)}?text=Olá!" target="_blank" class="btn-action-pill wa" title="WhatsApp">💬 WhatsApp</a>
                       </div>
                     ` : `<div style="font-size:11px; color:var(--danger); font-weight:600;">⚠️ Sem telemóvel</div>`}
-                  </div>
-                `).join('')}
+                  </div>`;
+                }).join('')}
               </div>
             </div>`;
         }
@@ -1934,12 +1957,14 @@ const App = (() => {
   const renderRdVolRow = (v, roleLabel, rClass) => {
     if (!v) return '';
     const nameColor = getVolNameColor(rClass);
+    const showDesig = !!v.designationName;
     return `
       <div class="vol-row-item" style="display:flex; flex-direction:column; gap:6px; align-items:stretch; padding: 10px 12px; background: #ffffff; border-radius: 12px; border: 1px solid rgba(0,0,0,0.03); margin-bottom: 4px;">
         <div style="display:flex; flex-direction:column; gap:2px;">
           <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
             <span class="vol-name" style="font-size:13px; font-weight: 700; color: ${nameColor};">${esc(v.fullName)}</span>
             <span class="resp-badge-small ${rClass}" style="margin:0; font-size:9px; padding:2px 6px;">${roleLabel}</span>
+            ${showDesig ? `<span class="resp-badge-small" style="margin:0; font-size:9px; padding:2px 6px; background:#e2e8f0; color:#475569; border: 1px solid #cbd5e1; font-weight:600; border-radius:4px;">${esc(v.designationName)}</span>` : ''}
           </div>
           <span class="vol-cong" style="font-size:11.5px; color:var(--text-muted);">${esc(v.congregation || 'Sem Congregação')}</span>
         </div>
@@ -2100,11 +2125,15 @@ const App = (() => {
       group.items.sort((a, b) => (a.subSector || 'Geral').localeCompare(b.subSector || 'Geral'));
     });
 
-    // Filter shifts based on selected sector (if a specific sector is selected)
+    // Filter shifts based on selected sectors/subsetores
     let availableShifts = sortedShifts;
-    if (activeRdSectorId && activeRdSectorId !== 'all') {
+    if (activeRdSectorIds.length > 0) {
       availableShifts = sortedShifts.filter(s => 
-        db.assignments.some(a => a.shiftId === s.id && a.sectorId === activeRdSectorId)
+        db.assignments.some(a => a.shiftId === s.id && activeRdSectorIds.includes(a.sectorId))
+      );
+    } else if (activeRdGroupSectors.length > 0) {
+      availableShifts = sortedShifts.filter(s => 
+        db.assignments.some(a => a.shiftId === s.id && db.sectors.some(sec => sec.id === a.sectorId && activeRdGroupSectors.includes(sec.name)))
       );
     }
 
@@ -2120,33 +2149,69 @@ const App = (() => {
     // Get current shift object
     const selectedShift = activeRdShiftId ? db.shifts.find(s => s.id === activeRdShiftId) : null;
 
-    // Build filters HTML with organic custom styles (using custom combobox for Setor)
+    // Build filters HTML with organic custom styles (using custom combobox for Setor and Subsetor)
     let filterHtml = `
-      <div class="rd-filters-container">
-        <!-- Setor Filter first to drive the Shift options -->
-        <div class="rd-filter-group">
+      <div style="display: flex; flex-direction: column; margin-bottom: 20px; padding: 0 4px; gap: 12px;">
+        <!-- Setor Filter first and full width (Combobox Multi-Select) -->
+        <div class="rd-filter-group" style="width: 100%;">
           <span class="rd-filter-label">Setor</span>
-          <div class="rd-combobox" id="rdSectorCombobox">
+          <div class="rd-combobox" id="rdGroupSectorCombobox">
             <div class="rd-combobox-input-wrapper">
-              <input type="text" id="rdSectorSearchInput" class="rd-combobox-input" placeholder="Pesquisar setor..." autocomplete="off">
+              <input type="text" id="rdGroupSectorSearchInput" class="rd-combobox-input" placeholder="Pesquisar setores..." autocomplete="off">
+              ${activeRdGroupSectors.length > 0 ? `<span class="rd-combobox-clear" id="rdGroupSectorClearBtn">✖</span>` : ''}
               <span class="rd-combobox-arrow">▼</span>
             </div>
-            <div class="rd-combobox-dropdown" id="rdSectorDropdown" style="display: none;"></div>
+            <div class="rd-combobox-dropdown" id="rdGroupSectorDropdown" style="display: none;"></div>
+          </div>
+          <div id="rdGroupSectorBadges" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
+            ${activeRdGroupSectors.map(name => `
+              <span class="badge-tag" data-name="${name}" style="background: var(--primary-light); color: var(--primary); font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border: 1px solid rgba(47,53,143,0.15);">
+                ${esc(name)} <span style="font-weight: 900; font-size: 10px; opacity: 0.7;">✖</span>
+              </span>
+            `).join('')}
           </div>
         </div>
 
-        <div class="rd-filter-group">
-          <span class="rd-filter-label">Turno</span>
-          <div class="rd-select-wrapper">
-            <select id="rdFilterShift" class="rd-select-custom" ${availableShifts.length === 0 ? 'disabled style="opacity: 0.5;"' : ''}>
-              ${availableShifts.length > 0 
-                ? availableShifts.map(s => {
-                    const selectedAttr = s.id === activeRdShiftId ? 'selected' : '';
-                    return `<option value="${s.id}" ${selectedAttr}>${getWeekDay(s.date)}, ${formatDate(s.date)} — ${s.startTime} às ${s.endTime}</option>`;
-                  }).join('')
-                : '<option value="">Nenhum turno</option>'
-              }
-            </select>
+        <div class="rd-filters-container" style="margin-bottom: 0; padding: 0;">
+          <!-- Subsetor Filter (combobox Multi-Select) -->
+          <div class="rd-filter-group">
+            <span class="rd-filter-label">Subsetor</span>
+            <div class="rd-combobox" id="rdSectorCombobox">
+              <div class="rd-combobox-input-wrapper">
+                <input type="text" id="rdSectorSearchInput" class="rd-combobox-input" placeholder="Pesquisar subsetor..." autocomplete="off">
+                ${activeRdSectorIds.length > 0 ? `<span class="rd-combobox-clear" id="rdSectorClearBtn">✖</span>` : ''}
+                <span class="rd-combobox-arrow">▼</span>
+              </div>
+              <div class="rd-combobox-dropdown" id="rdSectorDropdown" style="display: none;"></div>
+            </div>
+            <div id="rdSectorBadges" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;">
+              ${activeRdSectorIds.map(id => {
+                const sec = db.sectors.find(s => s.id === id);
+                if (!sec) return '';
+                const display = `${sec.name} (${sec.subSector || 'Geral'})`;
+                return `
+                  <span class="badge-tag-sec" data-id="${id}" style="background: rgba(5, 150, 105, 0.1); color: #059669; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 12px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border: 1px solid rgba(5, 150, 105, 0.15);">
+                    ${esc(display)} <span style="font-weight: 900; font-size: 10px; opacity: 0.7;">✖</span>
+                  </span>
+                `;
+              }).join('')}
+            </div>
+          </div>
+
+          <!-- Turno Filter -->
+          <div class="rd-filter-group">
+            <span class="rd-filter-label">Turno</span>
+            <div class="rd-select-wrapper">
+              <select id="rdFilterShift" class="rd-select-custom" ${availableShifts.length === 0 ? 'disabled style="opacity: 0.5;"' : ''}>
+                ${availableShifts.length > 0 
+                  ? availableShifts.map(s => {
+                      const selectedAttr = s.id === activeRdShiftId ? 'selected' : '';
+                      return `<option value="${s.id}" ${selectedAttr}>${getWeekDay(s.date)}, ${formatDate(s.date)} — ${s.startTime} às ${s.endTime}</option>`;
+                    }).join('')
+                  : '<option value="">Nenhum turno</option>'
+                }
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -2159,9 +2224,10 @@ const App = (() => {
     const activeShiftAssigns = activeRdShiftId ? db.assignments.filter(a => a.shiftId === activeRdShiftId) : [];
     
     let sectorsToShow = [];
-    if (activeRdSectorId !== 'all') {
-      const sec = db.sectors.find(s => s.id === activeRdSectorId);
-      if (sec) sectorsToShow.push(sec);
+    if (activeRdSectorIds.length > 0) {
+      sectorsToShow = sortedSectors.filter(s => activeRdSectorIds.includes(s.id));
+    } else if (activeRdGroupSectors.length > 0) {
+      sectorsToShow = sortedSectors.filter(s => activeRdGroupSectors.includes(s.name));
     } else {
       sectorsToShow = sortedSectors;
     }
@@ -2193,7 +2259,97 @@ const App = (() => {
 
     rdViewContent.innerHTML = contentHtml;
 
-    // Combobox elements and rendering logic
+    // Combobox Group Sector elements and rendering logic
+    const comboboxGroup = target.querySelector('#rdGroupSectorCombobox');
+    const searchInputGroup = target.querySelector('#rdGroupSectorSearchInput');
+    const dropdownGroup = target.querySelector('#rdGroupSectorDropdown');
+
+    const renderGroupDropdownItems = (searchTerm = '') => {
+      const term = searchTerm.toLowerCase().trim();
+      let html = '';
+      
+      const allSelected = activeRdGroupSectors.length === 0;
+      if (!term || 'todos'.includes(term)) {
+        html += `<div class="rd-dropdown-item all-option ${allSelected ? 'selected' : ''}" data-value="all">Todos os Setores</div>`;
+      }
+      
+      sectorsGrouped.forEach(group => {
+        if (!term || group.name.toLowerCase().includes(term)) {
+          const isSelected = activeRdGroupSectors.includes(group.name);
+          html += `
+            <div class="rd-dropdown-item ${isSelected ? 'selected' : ''}" data-value="${esc(group.name)}">
+              <span>${esc(group.name)}</span>
+              ${isSelected ? '<span style="color:var(--primary); font-weight:bold; font-size:12px;">✓</span>' : ''}
+            </div>
+          `;
+        }
+      });
+      
+      if (!html) {
+        html = `<div style="padding: 12px; font-size: 13px; color: var(--text-muted); text-align: center;">Nenhum setor encontrado</div>`;
+      }
+      return html;
+    };
+
+    // Toggle dropdown Group
+    searchInputGroup.addEventListener('focus', () => {
+      dropdownGroup.innerHTML = renderGroupDropdownItems(searchInputGroup.value);
+      dropdownGroup.style.display = 'block';
+      comboboxGroup.classList.add('open');
+    });
+
+    searchInputGroup.addEventListener('input', (e) => {
+      dropdownGroup.innerHTML = renderGroupDropdownItems(e.target.value);
+    });
+
+    dropdownGroup.addEventListener('click', (e) => {
+      const item = e.target.closest('.rd-dropdown-item');
+      if (item) {
+        const val = item.dataset.value;
+        if (val === 'all') {
+          activeRdGroupSectors = [];
+          activeRdSectorIds = [];
+        } else {
+          const idx = activeRdGroupSectors.indexOf(val);
+          if (idx > -1) {
+            activeRdGroupSectors.splice(idx, 1);
+            // Remove subsetores of this group
+            activeRdSectorIds = activeRdSectorIds.filter(id => {
+              const sec = db.sectors.find(s => s.id === id);
+              return !sec || sec.name !== val;
+            });
+          } else {
+            activeRdGroupSectors.push(val);
+          }
+        }
+        renderRdView(target);
+      }
+    });
+
+    const closeDropdownGroupHandler = (e) => {
+      if (!comboboxGroup.contains(e.target)) {
+        dropdownGroup.style.display = 'none';
+        comboboxGroup.classList.remove('open');
+        searchInputGroup.value = '';
+        document.removeEventListener('click', closeDropdownGroupHandler);
+      }
+    };
+
+    searchInputGroup.addEventListener('focus', () => {
+      document.addEventListener('click', closeDropdownGroupHandler);
+    });
+
+    const clearGroupBtn = target.querySelector('#rdGroupSectorClearBtn');
+    if (clearGroupBtn) {
+      clearGroupBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        activeRdGroupSectors = [];
+        activeRdSectorIds = [];
+        renderRdView(target);
+      });
+    }
+
+    // Combobox Subsetor elements and rendering logic
     const combobox = target.querySelector('#rdSectorCombobox');
     const searchInput = target.querySelector('#rdSectorSearchInput');
     const dropdown = target.querySelector('#rdSectorDropdown');
@@ -2202,12 +2358,16 @@ const App = (() => {
       const term = searchTerm.toLowerCase().trim();
       let html = '';
       
-      const allSelected = activeRdSectorId === 'all';
+      const allSelected = activeRdSectorIds.length === 0;
       if (!term || 'todos'.includes(term)) {
-        html += `<div class="rd-dropdown-item all-option ${allSelected ? 'selected' : ''}" data-value="all">Todos</div>`;
+        html += `<div class="rd-dropdown-item all-option ${allSelected ? 'selected' : ''}" data-value="all">Todos os Subsetores</div>`;
       }
       
-      sectorsGrouped.forEach(group => {
+      const groupsToRender = activeRdGroupSectors.length === 0
+        ? sectorsGrouped
+        : sectorsGrouped.filter(g => activeRdGroupSectors.includes(g.name));
+
+      groupsToRender.forEach(group => {
         const filteredItems = group.items.filter(sec => {
           const label = `${group.name} ${sec.subSector || 'Geral'}`.toLowerCase();
           return label.includes(term);
@@ -2215,12 +2375,13 @@ const App = (() => {
         
         if (filteredItems.length > 0) {
           html += `<div class="rd-dropdown-group">`;
-          html += `<span class="rd-dropdown-group-label">${esc(group.name)}</span>`;
+          html += `<span class="rd-dropdown-group-label" style="font-weight: 800; color: var(--primary); background: var(--primary-light); padding: 8px 14px; text-transform: uppercase; letter-spacing: 0.05em; display: block;">${esc(group.name)}</span>`;
           filteredItems.forEach(sec => {
-            const isSelected = sec.id === activeRdSectorId;
+            const isSelected = activeRdSectorIds.includes(sec.id);
             html += `
               <div class="rd-dropdown-item ${isSelected ? 'selected' : ''}" data-value="${sec.id}">
                 <span>${esc(sec.subSector || 'Geral')}</span>
+                ${isSelected ? '<span style="color:var(--primary); font-weight:bold; font-size:12px;">✓</span>' : ''}
               </div>
             `;
           });
@@ -2229,26 +2390,15 @@ const App = (() => {
       });
       
       if (!html) {
-        html = `<div style="padding: 12px; font-size: 13px; color: var(--text-muted); text-align: center;">Nenhum setor encontrado</div>`;
+        html = `<div style="padding: 12px; font-size: 13px; color: var(--text-muted); text-align: center;">Nenhum subsetor encontrado</div>`;
       }
       
       return html;
     };
 
-    // Set initial input value
-    if (activeRdSectorId === 'all') {
-      searchInput.value = 'Todos';
-    } else {
-      const currentSec = db.sectors.find(s => s.id === activeRdSectorId);
-      if (currentSec) {
-        searchInput.value = `${currentSec.name} (${currentSec.subSector || 'Geral'})`;
-      }
-    }
-
-    // Toggle dropdown
+    // Toggle dropdown Subsetor
     searchInput.addEventListener('focus', () => {
-      searchInput.select();
-      dropdown.innerHTML = renderDropdownItems(searchInput.value === 'Todos' ? '' : searchInput.value);
+      dropdown.innerHTML = renderDropdownItems(searchInput.value);
       dropdown.style.display = 'block';
       combobox.classList.add('open');
     });
@@ -2261,7 +2411,16 @@ const App = (() => {
       const item = e.target.closest('.rd-dropdown-item');
       if (item) {
         const val = item.dataset.value;
-        activeRdSectorId = val;
+        if (val === 'all') {
+          activeRdSectorIds = [];
+        } else {
+          const idx = activeRdSectorIds.indexOf(val);
+          if (idx > -1) {
+            activeRdSectorIds.splice(idx, 1);
+          } else {
+            activeRdSectorIds.push(val);
+          }
+        }
         renderRdView(target);
       }
     });
@@ -2270,20 +2429,46 @@ const App = (() => {
       if (!combobox.contains(e.target)) {
         dropdown.style.display = 'none';
         combobox.classList.remove('open');
-        if (activeRdSectorId === 'all') {
-          searchInput.value = 'Todos';
-        } else {
-          const currentSec = db.sectors.find(s => s.id === activeRdSectorId);
-          if (currentSec) {
-            searchInput.value = `${currentSec.name} (${currentSec.subSector || 'Geral'})`;
-          }
-        }
+        searchInput.value = '';
         document.removeEventListener('click', closeDropdownHandler);
       }
     };
 
     searchInput.addEventListener('focus', () => {
       document.addEventListener('click', closeDropdownHandler);
+    });
+
+    const clearBtn = target.querySelector('#rdSectorClearBtn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        activeRdSectorIds = [];
+        renderRdView(target);
+      });
+    }
+
+    // Badge click to remove tag
+    target.querySelectorAll('.badge-tag').forEach(badge => {
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const name = badge.dataset.name;
+        activeRdGroupSectors = activeRdGroupSectors.filter(n => n !== name);
+        // Also remove subsetores of this group
+        activeRdSectorIds = activeRdSectorIds.filter(id => {
+          const sec = db.sectors.find(s => s.id === id);
+          return !sec || sec.name !== name;
+        });
+        renderRdView(target);
+      });
+    });
+
+    target.querySelectorAll('.badge-tag-sec').forEach(badge => {
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = badge.dataset.id;
+        activeRdSectorIds = activeRdSectorIds.filter(x => x !== id);
+        renderRdView(target);
+      });
     });
 
     // Attach event listeners to other filters
