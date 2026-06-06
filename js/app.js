@@ -739,7 +739,7 @@ const App = (() => {
     else if (r === 'KM') roleText = 'Homem-Chave';
     else if (r.includes('TORNI')) roleText = 'Torniquetes';
     else if (currentUser.isSister || r === 'IRM') roleText = 'Irmã';
-    userRoleBadge.textContent = roleText;
+    userRoleBadge.textContent = roleText + " [Responsibility: " + (currentUser.responsibility || "N/A") + " | isUsher: " + currentUser.isUsher + " | isSister: " + currentUser.isSister + " | id: " + currentUser.id + "]";
 
     detectScaleChanges(db);
     renderRoleDashboard();
