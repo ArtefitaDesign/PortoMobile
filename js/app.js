@@ -190,7 +190,7 @@ const App = (() => {
       
       // Try to sync with server quietly if online
       if (window.location.protocol !== 'file:') {
-        fetch('./porto2026_mobile.enc?_t=' + Date.now(), { method: 'HEAD', cache: 'no-cache' })
+        fetch('./porto2026_mobile.enc?_t=' + Date.now(), { method: 'HEAD' })
           .then(res => {
             if (res.ok) {
               const newVersion = res.headers.get('ETag') || res.headers.get('Last-Modified') || res.headers.get('Content-Length');
@@ -204,7 +204,7 @@ const App = (() => {
           })
           .then(newVersion => {
             if (newVersion) {
-              return fetch('./porto2026_mobile.enc?_t=' + Date.now(), { cache: 'no-cache' })
+              return fetch('./porto2026_mobile.enc?_t=' + Date.now())
                 .then(res => { if (res.ok) return res.text(); })
                 .then(text => {
                   if (text && text !== savedGlobalEnc) {
@@ -227,7 +227,7 @@ const App = (() => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-      fetch('./porto2026_mobile.enc?_t=' + Date.now(), { signal: controller.signal, cache: 'no-cache' })
+      fetch('./porto2026_mobile.enc?_t=' + Date.now(), { signal: controller.signal })
         .then(response => {
           clearTimeout(timeoutId);
           if (!response.ok) throw new Error("Offline");
@@ -587,7 +587,7 @@ const App = (() => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2500);
 
-    fetch('./porto2026_mobile.enc?_t=' + Date.now(), { signal: controller.signal, cache: 'no-cache' })
+    fetch('./porto2026_mobile.enc?_t=' + Date.now(), { signal: controller.signal })
       .then(response => {
         clearTimeout(timeoutId);
         if (!response.ok) throw new Error("Offline");
